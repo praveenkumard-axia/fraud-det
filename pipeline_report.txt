@@ -1,0 +1,151 @@
+--- Session Started: 2026-01-21 17:24:39 ---
+[TELEMETRY] stage=Waiting | status=Ready | rows=0 | throughput=0 | elapsed=0.0 | cpu_cores=0.0 | ram_gb=0.0 | ram_percent=0.0
+
+>>> STARTING STAGE: Ingest
+[TELEMETRY] stage=Ingest | status=Running | rows=0 | throughput=0 | elapsed=0.0 | cpu_cores=0.0 | ram_gb=0.0 | ram_percent=0.0
+------------------------------------------------------------
+2026-01-21 17:24:39 | ======================================================================
+2026-01-21 17:24:39 | Pod 1: Optimized Fraud Data Generator
+2026-01-21 17:24:39 | ======================================================================
+2026-01-21 17:24:39 | Output:   /home/anuj/Axia/fraud_dectection_anuj/run_data_output/run_20260121_172439
+2026-01-21 17:24:39 | Workers:  16
+2026-01-21 17:24:39 | Duration: 10s
+2026-01-21 17:24:39 | Chunk:    100,000 rows
+2026-01-21 17:24:39 | ----------------------------------------------------------------------
+2026-01-21 17:24:39 | Generating string pools...
+2026-01-21 17:24:45 |   Created 235,000 pooled values
+2026-01-21 17:24:45 | Launching 16 workers...
+2026-01-21 17:24:46 | [  1.0s] Files:     0 | Size:   0.00 GB | Speed:  0.00 GB/s | Workers: 16
+2026-01-21 17:24:46 |         CPU:  24.5% | RAM:  59.6% (9.2 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=0 | throughput=0 | elapsed=1.0 | cpu_cores=2.9 | ram_gb=9.16 | ram_percent=59.6
+2026-01-21 17:24:47 | [  2.0s] Files:    17 | Size:   0.15 GB | Speed:  0.15 GB/s | Workers: 16
+2026-01-21 17:24:47 |         CPU: 100.0% | RAM:  68.5% (10.5 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=1700000 | throughput=848664 | elapsed=2.0 | cpu_cores=12.0 | ram_gb=10.51 | ram_percent=68.5
+2026-01-21 17:24:48 | [  3.0s] Files:    35 | Size:   0.29 GB | Speed:  0.14 GB/s | Workers: 16
+2026-01-21 17:24:48 |         CPU: 100.0% | RAM:  72.7% (11.2 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=3500000 | throughput=1165129 | elapsed=3.0 | cpu_cores=12.0 | ram_gb=11.16 | ram_percent=72.7
+2026-01-21 17:24:49 | [  4.0s] Files:    47 | Size:   0.46 GB | Speed:  0.17 GB/s | Workers: 16
+2026-01-21 17:24:49 |         CPU: 100.0% | RAM:  73.8% (11.3 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=4700000 | throughput=1171844 | elapsed=4.0 | cpu_cores=12.0 | ram_gb=11.33 | ram_percent=73.8
+2026-01-21 17:24:50 | [  5.0s] Files:    60 | Size:   0.60 GB | Speed:  0.14 GB/s | Workers: 16
+2026-01-21 17:24:50 |         CPU: 100.0% | RAM:  75.2% (11.5 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=6000000 | throughput=1195929 | elapsed=5.0 | cpu_cores=12.0 | ram_gb=11.54 | ram_percent=75.2
+2026-01-21 17:24:51 | [  6.0s] Files:    72 | Size:   0.74 GB | Speed:  0.14 GB/s | Workers: 16
+2026-01-21 17:24:51 |         CPU: 100.0% | RAM:  76.3% (11.7 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=7200000 | throughput=1195163 | elapsed=6.0 | cpu_cores=12.0 | ram_gb=11.71 | ram_percent=76.3
+2026-01-21 17:24:52 | [  7.0s] Files:    86 | Size:   0.89 GB | Speed:  0.14 GB/s | Workers: 16
+2026-01-21 17:24:52 |         CPU: 100.0% | RAM:  75.6% (11.6 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=8600000 | throughput=1223626 | elapsed=7.0 | cpu_cores=12.0 | ram_gb=11.6 | ram_percent=75.6
+2026-01-21 17:24:53 | [  8.0s] Files:    95 | Size:   1.03 GB | Speed:  0.14 GB/s | Workers: 16
+2026-01-21 17:24:53 |         CPU: 100.0% | RAM:  76.5% (11.7 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=9500000 | throughput=1182170 | elapsed=8.0 | cpu_cores=12.0 | ram_gb=11.74 | ram_percent=76.5
+2026-01-21 17:24:54 | [  9.0s] Files:   110 | Size:   1.16 GB | Speed:  0.13 GB/s | Workers: 16
+2026-01-21 17:24:54 |         CPU: 100.0% | RAM:  75.0% (11.5 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=11000000 | throughput=1215926 | elapsed=9.0 | cpu_cores=12.0 | ram_gb=11.52 | ram_percent=75.0
+2026-01-21 17:24:55 | [ 10.1s] Files:   122 | Size:   1.32 GB | Speed:  0.16 GB/s | Workers: 16
+2026-01-21 17:24:55 |         CPU: 100.0% | RAM:  76.2% (11.7 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=12200000 | throughput=1213417 | elapsed=10.1 | cpu_cores=12.0 | ram_gb=11.7 | ram_percent=76.2
+2026-01-21 17:24:56 | [ 11.1s] Files:   133 | Size:   1.46 GB | Speed:  0.14 GB/s | Workers: 13
+2026-01-21 17:24:56 |         CPU: 100.0% | RAM:  68.3% (10.5 GB)
+[TELEMETRY] stage=Ingest | status=Running | rows=13300000 | throughput=1202286 | elapsed=11.1 | cpu_cores=12.0 | ram_gb=10.49 | ram_percent=68.3
+2026-01-21 17:24:57 | Waiting for workers to sync and exit...
+2026-01-21 17:24:57 | ======================================================================
+2026-01-21 17:24:57 | COMPLETE
+2026-01-21 17:24:57 | METRICS: Rows=13400000 | Time=12.08s | Throughput=1109124.9 rows/s | Size=1.50 GB
+2026-01-21 17:24:57 | METRICS: CPU=5.3 Cores | RAM=48.0% (7.37 GB)
+2026-01-21 17:24:57 | ======================================================================
+[TELEMETRY] stage=Ingest | status=Completed | rows=13400000 | throughput=1109124 | elapsed=12.1 | cpu_cores=5.3 | ram_gb=7.37 | ram_percent=48.0
+------------------------------------------------------------
+
+>>> STARTING STAGE: Data Prep
+[TELEMETRY] stage=Data Prep | status=Running | rows=0 | throughput=0 | elapsed=0.0 | cpu_cores=0.0 | ram_gb=0.0 | ram_percent=0.0
+------------------------------------------------------------
+2026-01-21 17:24:57 | ======================================================================
+2026-01-21 17:24:57 | Pod 2: Feature Engineering (Optimized)
+2026-01-21 17:24:57 | ======================================================================
+2026-01-21 17:24:57 | Input:    /home/anuj/Axia/fraud_dectection_anuj/run_data_output
+2026-01-21 17:24:57 | Output:   /home/anuj/Axia/fraud_dectection_anuj/run_features_output
+2026-01-21 17:24:57 | Backend:  Polars (CPU)
+2026-01-21 17:24:57 | ======================================================================
+2026-01-21 17:24:57 | Processing run_20260121_172439...
+2026-01-21 17:25:00 | Completed run_20260121_172439 (13,400,000 rows) in 1.45s
+[TELEMETRY] stage=Data Prep | status=Running | rows=13400000 | throughput=9244645 | elapsed=1.4 | cpu_cores=5.3 | ram_gb=7.51 | ram_percent=48.9
+2026-01-21 17:25:00 | ======================================================================
+2026-01-21 17:25:00 | METRICS: Rows=13400000 | Time=3.46s | Throughput=3870576.2 rows/s
+2026-01-21 17:25:00 | METRICS: CPU=0.0 Cores | RAM=48.9% (7.51 GB)
+2026-01-21 17:25:00 | ======================================================================
+2026-01-21 17:25:00 | COMPLETE
+[TELEMETRY] stage=Data Prep | status=Completed | rows=13400000 | throughput=3870576 | elapsed=3.5 | cpu_cores=0.0 | ram_gb=7.51 | ram_percent=48.9
+------------------------------------------------------------
+
+>>> STARTING STAGE: Model Train
+[TELEMETRY] stage=Model Train | status=Running | rows=0 | throughput=0 | elapsed=0.0 | cpu_cores=0.0 | ram_gb=0.0 | ram_percent=0.0
+------------------------------------------------------------
+2026-01-21 17:25:01,597 | INFO | ======================================================================
+2026-01-21 17:25:01,597 | INFO | Pod 3: Optimized Model Training
+2026-01-21 17:25:01,597 | INFO | ======================================================================
+2026-01-21 17:25:01,597 | INFO | Input:   /home/anuj/Axia/fraud_dectection_anuj/run_features_output
+2026-01-21 17:25:01,597 | INFO | Output:  /home/anuj/Axia/fraud_dectection_anuj/run_models_output
+2026-01-21 17:25:01,597 | INFO | Backend: XGBoost CPU (Polars)
+2026-01-21 17:25:01,597 | INFO | ======================================================================
+2026-01-21 17:25:01,598 | INFO | Loading features from: features_run_20260121_172439.parquet
+2026-01-21 17:25:01,608 | INFO | Loading features from: features_run_20260121_172439.parquet
+2026-01-21 17:25:01,834 | WARNING | Missing features: ['category_encoded', 'state_encoded', 'gender_encoded', 'city_pop_log', 'zip_region']
+2026-01-21 17:25:04,846 | INFO | Loaded 13,400,000 records on CPU in 3.24s
+2026-01-21 17:25:07,186 | INFO | Training model...
+2026-01-21 17:30:53,344 | INFO | Training completed in 348.47s
+2026-01-21 17:30:58,334 | INFO | Accuracy: 0.6309
+2026-01-21 17:30:58,372 | INFO | Model saved to /home/anuj/Axia/fraud_dectection_anuj/run_models_output/fraud_xgboost
+2026-01-21 17:30:58,379 | INFO | METRICS: Rows=13400000 | Time=356.78s | Throughput=37557.9 rows/s
+2026-01-21 17:30:58,380 | INFO | METRICS: CPU=1.4 Cores | RAM=43.2% (6.63 GB)
+[TELEMETRY] stage=Model Train | status=Completed | rows=13400000 | throughput=37557 | elapsed=356.8 | cpu_cores=1.4 | ram_gb=6.63 | ram_percent=43.2
+------------------------------------------------------------
+
+>>> STARTING STAGE: Inference
+[TELEMETRY] stage=Inference | status=Running | rows=0 | throughput=0 | elapsed=0.0 | cpu_cores=0.0 | ram_gb=0.0 | ram_percent=0.0
+------------------------------------------------------------
+Traceback (most recent call last):
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/connectionpool.py", line 158, in get_socket
+return self._socket_queue.get(block=False)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "src/gevent/queue.py", line 406, in gevent._gevent_cqueue.SimpleQueue.get
+File "src/gevent/queue.py", line 422, in gevent._gevent_cqueue.SimpleQueue.get
+File "src/gevent/queue.py", line 390, in gevent._gevent_cqueue.SimpleQueue._SimpleQueue__get_or_peek
+_queue.Empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+File "/home/anuj/Axia/fraud_dectection_anuj/pods/inference/client.py", line 61, in <module>
+main()
+File "/home/anuj/Axia/fraud_dectection_anuj/pods/inference/client.py", line 24, in main
+if not triton_client.is_server_live():
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/tritonclient/http/_client.py", line 365, in is_server_live
+response = self._get(
+^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/tritonclient/http/_client.py", line 250, in _get
+response = self._client_stub.get(request_uri, headers=headers)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/client.py", line 271, in get
+return self.request(METHOD_GET, request_uri, headers=headers)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/client.py", line 233, in request
+sock = self._connection_pool.get_socket()
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/connectionpool.py", line 161, in get_socket
+return self._create_socket()
+^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/connectionpool.py", line 126, in _create_socket
+raise first_error
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/connectionpool.py", line 113, in _create_socket
+sock = self._connect_socket(sock, sock_info[-1])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/geventhttpclient/connectionpool.py", line 134, in _connect_socket
+sock.connect(address)
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/gevent/_socketcommon.py", line 586, in connect
+self._internal_connect(address)
+File "/home/anuj/Axia/myenv/lib/python3.11/site-packages/gevent/_socketcommon.py", line 630, in _internal_connect
+raise _SocketError(err, strerror(err))
+ConnectionRefusedError: [Errno 111] Connection refused
+------------------------------------------------------------
