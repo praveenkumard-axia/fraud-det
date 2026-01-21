@@ -18,5 +18,4 @@ env/
 .idea/
 # Logs
 *.log
-pipeline_report.txt
-EOF
+
