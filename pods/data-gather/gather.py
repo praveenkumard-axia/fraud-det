@@ -244,8 +244,9 @@ try:
         pq.write_table(table, output_file, compression='snappy')
         file_count += 1
 except Exception as e:
-    # Just exit if error, minimal logging in worker
-    pass
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    raise e
 '''
 
 
