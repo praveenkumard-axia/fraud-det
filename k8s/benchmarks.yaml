@@ -81,6 +81,12 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chmod -R 777 /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
@@ -156,6 +162,12 @@ spec:
       nodeSelector:
         nvidia.com/gpu.present: "true"
       initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "chmod -R 777 /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
