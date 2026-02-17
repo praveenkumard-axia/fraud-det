@@ -129,7 +129,7 @@ def generate_pools(output_path: Path) -> Path:
 
 # Worker script (runs in subprocess for true parallelism)
 WORKER_SCRIPT = '''
-import sys, pickle, time
+import sys, pickle, time, os
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
