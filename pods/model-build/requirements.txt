@@ -1,5 +1,7 @@
 polars>=0.20.0
 xgboost>=1.7.0
 pyarrow>=12.0.0
-pandas>=2.0.0  # Fallback/Compat
+pandas>=2.0.0
 psutil
+torch
+prometheus-client

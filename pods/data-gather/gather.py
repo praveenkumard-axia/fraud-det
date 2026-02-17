@@ -328,6 +328,7 @@ def main():
     
     start_time = time.time()
     total_generated_rows = 0
+    previous_total_rows = 0
     
     try:
         while not STOP_FLAG:
@@ -339,7 +340,11 @@ def main():
             total_generated_rows = len(files) * chunk_size
             
             # Update Prometheus
-            GEN_COUNTER.inc(total_generated_rows - GEN_COUNTER._value.get())
+            if total_generated_rows > previous_total_rows:
+                delta = total_generated_rows - previous_total_rows
+                GEN_COUNTER.inc(delta)
+                previous_total_rows = total_generated_rows
+            
             tps = total_generated_rows / elapsed if elapsed > 0 else 0
             TPS_GAUGE.set(tps)
             

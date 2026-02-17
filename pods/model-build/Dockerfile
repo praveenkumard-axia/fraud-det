@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir xgboost>=2.0.0 \
     psutil \
     prometheus-client \
     polars \
-    pandas 
+    pandas \
+    torch
 
 COPY train.py .
 
