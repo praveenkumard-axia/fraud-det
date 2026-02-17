@@ -120,6 +120,10 @@ spec:
           value: "cpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/raw"
+        - name: OUTPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/features"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -184,6 +188,10 @@ spec:
           value: "gpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/raw"
+        - name: OUTPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
         resources:
           requests:
             cpu: "2"
@@ -255,6 +263,12 @@ spec:
           value: "gpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
+        - name: OUTPUT_DIR_CPU
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/models"
+        - name: OUTPUT_DIR_GPU
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/models"
         resources:
           requests:
             cpu: "2"
