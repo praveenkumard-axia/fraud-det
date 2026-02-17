@@ -655,6 +655,9 @@ async def tail_pod_logs(pod_name: str):
         for line in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
             if not state.is_running: break
             
+            # Debug: Print raw line to see if we get anything
+            # logger.debug(f"RAW LOG from {pod_name}: {line[:100]}")
+            
             # Update telemetry
             data = parse_telemetry_line(line)
             if data:
