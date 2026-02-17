@@ -1,0 +1,27 @@
+# ===== Web Framework =====
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# ===== Async HTTP (Prometheus / Exporters) =====
+httpx==0.28.1
+
+# ===== Kubernetes Client =====
+kubernetes==31.0.0
+
+# ===== Prometheus Integration =====
+prometheus-client==0.21.1
+
+# ===== Data Processing =====
+pydantic==2.10.6
+
+# ===== WebSockets =====
+websockets==12.0
+
+# ===== Time & Utilities =====
+python-dateutil==2.9.0.post0
+
+# ===== Optional: Better Logging =====
+loguru==0.7.2
+
+# ===== Optional: Environment Config =====
+python-dotenv==1.0.1
