@@ -310,12 +310,14 @@ async def run_pipeline_sequence():
         # For this function to return, we just start them and let them run in background.
         # But we should update state.
         
+        # 5. Start Log Monitoring
+        asyncio.create_task(monitor_logs(run_id))
         
     except Exception as e:
         logger.error(f"Pipeline Execution Failure: {e}")
-    finally:
-        state.is_running = False
-        logger.info(f"Pipeline {run_id} sequence triggers complete.")
+        state.is_running = False # Only set False on launch failure
+    
+    logger.info(f"Pipeline {run_id} launched successfully.")
 
 
 # ==================== Metric Sources (Prometheus) ====================
@@ -413,14 +415,19 @@ async def get_machine_metrics():
     cpu_util = await get_prometheus_metric('100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)')
     gpu_util = await get_prometheus_metric('avg(DCGM_FI_DEV_GPU_UTIL)')
     
-    # FlashBlade (Real)
-    fb_read = await get_prometheus_metric('purefb_array_read_bytes_per_sec') / (1024**2) 
-    fb_write = await get_prometheus_metric('purefb_array_write_bytes_per_sec') / (1024**2)
-    fb_util_raw = await get_prometheus_metric('purefb_hardware_component_utilization')
+    # FlashBlade (OpenMetrics)
+    # purefb_array_performance_throughput_bytes{dimension="read"}
+    fb_read = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="read"}') / (1024**2) 
+    fb_write = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="write"}') / (1024**2)
+    # purefb_array_performance_latency_usec{dimension="usec_per_read_op"}
+    # Utilization Proxy: If latency > 1ms (1000us), we consider it busy.
+    # Scale: 0-100 based on latency up to 5ms.
+    fb_lat = await get_prometheus_metric('purefb_array_performance_latency_usec{dimension="usec_per_read_op"}')
+    fb_util_raw = min(1.0, fb_lat / 5000.0) 
     
     # Throughput (Real)
-    cpu_tp = fb_read + fb_write # correlated for demo
-    gpu_tp = fb_read * 2 # GPU usually reads faster
+    cpu_tp = fb_read + fb_write 
+    gpu_tp = fb_read * 2 
     
     return {
         "is_running": state.is_running,
@@ -618,12 +625,99 @@ async def alerts_websocket(websocket: WebSocket):
     except WebSocketDisconnect:
         active_ws.remove(websocket)
 
-async def broadcast_alert(msg: str, level: str = "info"):
-    """Broadcast alert to all connected WebSocket clients"""
-    payload = json.dumps({"level": level, "msg": msg, "time": datetime.now(timezone.utc).isoformat()})
-    for ws in active_ws:
-        try: await ws.send_text(payload)
-        except: pass
+# ==================== Log Monitoring & Reconciliation ====================
+
+async def monitor_logs(run_id: str):
+    """Background task to tail logs and update telemetry"""
+    logger.info(f"Starting log monitor for run {run_id}")
+    pods_seen = set()
+    
+    while state.is_running:
+        try:
+            # 1. auto-discover pods
+            pods = k8s_core.list_namespaced_pod("fraud-det", label_selector=f"run_id={run_id}")
+            for pod in pods.items:
+                if pod.metadata.name not in pods_seen and pod.status.phase in ["Running", "Succeeded"]:
+                    pods_seen.add(pod.metadata.name)
+                    asyncio.create_task(tail_pod_logs(pod.metadata.name))
+            
+            await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"Monitor loop error: {e}")
+            await asyncio.sleep(5)
+
+async def tail_pod_logs(pod_name: str):
+    """Stream logs from a specific pod"""
+    logger.info(f"Tailing logs for {pod_name}")
+    try:
+        w = watch.Watch()
+        # Stream logs
+        for line in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
+            if not state.is_running: break
+            
+            # Update telemetry
+            data = parse_telemetry_line(line)
+            if data:
+                # Update global state
+                with state.lock:
+                    # Map stage names to telemetry keys
+                    # [TELEMETRY] stage=Ingest -> "generated"
+                    # [TELEMETRY] stage=Data Prep -> "data_prep_{cpu/gpu}"
+                    # [TELEMETRY] stage=Inference -> "inference_{cpu/gpu}"
+                    
+                    stage = data.get("stage", "")
+                    
+                    if "Ingest" in stage:
+                        state.telemetry["generated"] = data.get("rows", 0)
+                        state.telemetry["throughput"] = data.get("throughput", 0) # Generator TPS
+                        
+                    elif "Data Prep" in stage:
+                        # Differentiate CPU vs GPU based on pod name or 'backend' field if available
+                        if "gpu" in pod_name:
+                             state.telemetry["data_prep_gpu"] = data.get("rows", 0)
+                        else:
+                             state.telemetry["data_prep_cpu"] = data.get("rows", 0)
+                             
+                    elif "Inference" in stage:
+                        if "gpu" in pod_name:
+                            state.telemetry["inference_gpu"] = data.get("rows", 0)
+                        else:
+                            state.telemetry["inference_cpu"] = data.get("rows", 0)
+                            
+                        # Fraud stats
+                        # Ideally we sum fraud count
+                        # But here we might be overwriting. For a demo, taking the latest "total" is okay 
+                        # if the pods log cumulative totals.
+                        
+                    # Universal stats
+                    if "cpu_cores" in data: state.telemetry["cpu_percent"] = data["cpu_cores"] # Approximation
+                    if "ram_percent" in data: state.telemetry["ram_percent"] = data["ram_percent"]
+                    
+    except Exception as e:
+        logger.warning(f"Log tail ended for {pod_name}: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Recover state on restart"""
+    logger.info("Backend Startup: Checking for active runs...")
+    try:
+        # Check if any pods are running
+        pods = k8s_core.list_namespaced_pod("fraud-det", label_selector="app=fraud-benchmark")
+        active_pods = [p for p in pods.items if p.status.phase in ["Running", "Pending"]]
+        
+        if active_pods:
+            # Infer run_id
+            run_id = active_pods[0].metadata.labels.get("run_id")
+            if run_id:
+                logger.info(f"Recovered active run: {run_id}")
+                state.run_id = run_id
+                state.is_running = True
+                state.start_time = active_pods[0].metadata.creation_timestamp.timestamp()
+                
+                # Restart monitoring
+                asyncio.create_task(monitor_logs(run_id))
+    except Exception as e:
+        logger.error(f"Startup recovery failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -635,7 +729,7 @@ async def shutdown_event():
         try: await ws.close()
         except: pass
 
-@app.post("/api/control/reset-data-legacy") # Rename/Remove duplicate
+@app.post("/api/control/reset-data-legacy")
 async def reset_data():
     state.reset()
     return {"success": True, "message": "Metrics reset"}

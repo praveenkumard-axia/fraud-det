@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pure-exporter
+  namespace: fraud-det
+  labels:
+    app: pure-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pure-exporter
+  template:
+    metadata:
+      labels:
+        app: pure-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9300"
+    spec:
+      # Use hostNetwork to expose strictly on 9300 if required by external backend
+      hostNetwork: true 
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "" # Try to schedule on the main node (10.23.181.153 usually)
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: pure-exporter
+        image: purestorage/pure-exporter:latest
+        ports:
+        - containerPort: 9300
+          name: metrics
+        env:
+        - name: PURE_APITOKEN
+          value: "replace-with-your-api-token" # <--- USER MUST UPDATE THIS
+        - name: PURE_FLASHBLADE_ENDPOINT
+          value: "10.23.181.65" # From storage.yaml
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pure-exporter
+  namespace: fraud-det
+  labels:
+    app: pure-exporter
+spec:
+  ports:
+  - port: 9300
+    targetPort: 9300
+    protocol: TCP
+    name: metrics
+  selector:
+    app: pure-exporter
+  type: ClusterIP
