@@ -8,13 +8,13 @@ spec:
   accessModes:
     - ReadWriteMany
   nfs:
-    server: 10.23.181.60
-    path: /fraud-benchmark
+    server: 10.23.181.65
+    path: /financial-fraud-detection-demo
   mountOptions:
-    - nfsvers=4.1
-    - rsize=1048576
-    - wsize=1048576
+    - vers=3
+    - tcp
     - hard
+    - intr
     - noatime
     - nconnect=8
   persistentVolumeReclaimPolicy: Retain
