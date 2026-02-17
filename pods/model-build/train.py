@@ -67,7 +67,8 @@ try:
     import cudf
     import cupy as cp
     GPU_AVAILABLE = True
-except ImportError:
+except Exception as e:
+    print(f"WARNING: GPU libraries failed to import: {e}")
     GPU_AVAILABLE = False
 
 # Features for model training (aligned with prepare.py output)

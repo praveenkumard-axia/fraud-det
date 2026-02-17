@@ -19,14 +19,18 @@ import numpy as np
 import psutil
 
 # Try importing GPU libraries
+# Try importing GPU libraries
 try:
     import cudf
-    import cp
+    import cupy as cp
     import dask_cudf
     from dask.distributed import Client, wait
     from dask_cuda import LocalCUDACluster
     GPU_AVAILABLE = True
-except ImportError:
+except Exception as e:
+    print(f"WARNING: GPU libraries failed to import: {e}")
+    import traceback
+    traceback.print_exc()
     GPU_AVAILABLE = False
 
 # Import Polars for CPU
