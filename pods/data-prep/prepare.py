@@ -248,10 +248,28 @@ class DataPrepService:
         import dask_cudf
         ddf = dask_cudf.read_parquet([str(f) for f in files])
         
-        # Similar logic to CPU but on GPU
-        ddf['amt_log'] = ddf['amt'].log1p()
+        # Feature Engineering Pipeline (GPU)
+        ddf['amt_log'] = ddf['amt'].map_partitions(lambda s: cp.log1p(s))
+        
+        # Time features
         ddf['hour_of_day'] = (ddf['unix_time'] / 3600 % 24).astype('int8')
-        # ... more features ...
+        ddf['day_of_week'] = (ddf['unix_time'] / 86400 % 7).astype('int8')
+        
+        # Binary features
+        ddf['is_weekend'] = (ddf['day_of_week'] >= 5).astype('int8')
+        ddf['is_night'] = ((ddf['hour_of_day'] >= 22) | (ddf['hour_of_day'] <= 6)).astype('int8')
+        
+        # Distance calculation (Haversine approx for speed)
+        lat_diff = (ddf['merch_lat'] - ddf['lat']) * 111.0
+        lon_diff = (ddf['merch_long'] - ddf['long']) * 85.0
+        # dask_cudf supports element-wise ops, but sqrt usually safer via map_partitions with cupy
+        dist_sq = (lat_diff * lat_diff) + (lon_diff * lon_diff)
+        ddf['distance_km'] = dist_sq.map_partitions(lambda s: cp.sqrt(s))
+
+        # Select columns to keep (consistent with CPU)
+        # Drop string columns not needed for ML
+        cols_to_drop = [c for c in STRING_COLUMNS_TO_DROP if c in ddf.columns]
+        ddf = ddf.drop(columns=cols_to_drop)
         
         timestamp = int(time.time() * 1000)
         output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
