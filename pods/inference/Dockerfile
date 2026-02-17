@@ -7,7 +7,8 @@ RUN pip install --no-cache-dir \
     polars>=0.20.0 \
     xgboost>=2.0.0 \
     psutil>=5.9.0 \
-    tritonclient
+    tritonclient \
+    prometheus-client
 
 COPY client.py .
 
