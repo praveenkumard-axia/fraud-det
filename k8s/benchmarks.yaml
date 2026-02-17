@@ -28,6 +28,17 @@ spec:
         operator: "Equal"
         value: "gpu"
         effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: gather
         image: pduraiswamy16722/fraud-data-gather:latest
@@ -77,6 +88,14 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
@@ -130,6 +149,14 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
@@ -186,6 +213,14 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: train
         image: pduraiswamy16722/fraud-model-build:latest
@@ -238,6 +273,14 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
@@ -287,6 +330,14 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
