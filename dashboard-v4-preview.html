@@ -1888,9 +1888,9 @@
     function wsUrl() {
       if (BACKEND_URL) {
         const u = new URL(BACKEND_URL);
-        return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + (u.pathname.replace(/\/?$/, '') || '') + '/data/dashboard';
+        return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + (u.pathname.replace(/\/?$/, '') || '') + '/api/ws/alerts';
       }
-      return (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/data/dashboard';
+      return (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/api/ws/alerts';
     }
 
     let scaleState = { preprocessing: 0, inference: 0, preprocessing_gpu: 0, inference_gpu: 0, generation_rate: 10000 };
