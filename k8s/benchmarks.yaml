@@ -83,7 +83,7 @@ spec:
       initContainers:
       - name: fix-permissions
         image: busybox
-        command: ["sh", "-c", "chmod -R 777 /fraud-benchmark"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -158,7 +158,7 @@ spec:
       initContainers:
       - name: fix-permissions
         image: busybox
-        command: ["sh", "-c", "chmod -R 777 /fraud-benchmark"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
