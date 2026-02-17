@@ -11,11 +11,9 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY prepare.py .
 
-ENV INPUT_DIR=/data/input
-ENV OUTPUT_DIR=/data/output
+ENV INPUT_DIR=/cpu/data/raw
+ENV OUTPUT_DIR=/cpu/data/features
+ENV FORCE_CPU=true
 ENV BATCH_MODE=true
-ENV LATEST_ONLY=true
-ENV MAX_FILES_PER_RUN=100
-ENV USE_MULTI_GPU=true
 
 CMD ["python", "prepare.py"]

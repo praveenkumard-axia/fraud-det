@@ -75,7 +75,7 @@ POOL_SIZES = {
 
 
 def log(msg):
-    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
+    print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
 def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, status="Running"):
     """Write structured telemetry to logs for dashboard parsing."""
@@ -250,141 +250,138 @@ except Exception as e:
 
 
 
+from prometheus_client import start_http_server, Counter, Gauge, CollectorRegistry, push_to_gateway
+
+# Prometheus Metrics
+REGISTRY = CollectorRegistry()
+GEN_COUNTER = Counter("generated_records_total", "Total generated rows", registry=REGISTRY)
+TPS_GAUGE = Gauge("records_per_second", "Current generation throughput", registry=REGISTRY)
+
+def atomic_write(path: Path, content: str = ""):
+    """Enterprise-grade atomic write: tempfile -> fsync -> replace"""
+    dir_path = path.parent
+    dir_path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=str(dir_path), delete=False) as tmp:
+        tmp.write(content)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        temp_name = tmp.name
+    os.replace(temp_name, str(path))
+
 def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Configuration
-    output_dir = Path(os.getenv('OUTPUT_DIR', 'fraud_dectection_anuuj_output'))
-    num_workers = int(os.getenv('NUM_WORKERS', '16')) # Default lower for typical dev envs
-    duration = int(os.getenv('DURATION_SECONDS', '10'))
+    # Start Prometheus Exporter for real-time scraping
+    start_http_server(8000)
+    
+    # Run ID Isolation
+    run_id = os.getenv('RUN_ID', 'run-default')
+    run_root = Path(f"/fraud-benchmark/runs/{run_id}")
+    
+    output_dir_cpu = run_root / "cpu/data/raw"
+    output_dir_gpu = run_root / "gpu/data/raw"
+    
+    num_workers = int(os.getenv('NUM_WORKERS', '16'))
+    duration = int(os.getenv('DURATION_SECONDS', '3600')) # Default to 1h for benchmark
+    max_rows = int(os.getenv('MAX_ROWS', '1000000'))
     chunk_size = int(os.getenv('CHUNK_SIZE', '100000'))
     fraud_rate = float(os.getenv('FRAUD_RATE', '0.005'))
+    push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
     
-    # Create timestamped output directory
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_path = output_dir / f"run_{timestamp}"
-    run_path.mkdir(parents=True, exist_ok=True)
+    output_dir_cpu.mkdir(parents=True, exist_ok=True)
+    output_dir_gpu.mkdir(parents=True, exist_ok=True)
     
     log("=" * 70)
-    log("Pod 1: Optimized Fraud Data Generator")
-    log("=" * 70)
-    log(f"Output:   {run_path}")
-    log(f"Workers:  {num_workers}")
-    log(f"Duration: {duration}s")
-    log(f"Chunk:    {chunk_size:,} rows")
+    log("Pod 1: Enterprise Data Generator")
+    log(f"RUN_ID:     {run_id}")
+    log(f"Output CPU: {output_dir_cpu}")
+    log(f"Max Rows:   {max_rows:,}")
     log("-" * 70)
     
     # Generate string pools
-    pools_file = generate_pools(run_path)
+    pools_file = generate_pools(output_dir_cpu)
     
-    # Launch worker processes
+    # Modified Worker for Dual Atomic Writes
+    WORKER_DUAL_SCRIPT = WORKER_SCRIPT.replace(
+        "pq.write_table(table, output_file, compression='snappy')",
+        "tmp_file = str(output_file) + '.tmp'\n" +
+        "        pq.write_table(table, tmp_file, compression='snappy')\n" +
+        "        os.rename(tmp_file, output_file)\n" +
+        "        import shutil\n" +
+        "        shutil.copy(output_file, Path(sys.argv[7]) / output_file.name)"
+    )
+    
     log(f"Launching {num_workers} workers...")
     processes = []
     for i in range(num_workers):
         p = subprocess.Popen(
-            [sys.executable, '-c', WORKER_SCRIPT, 
-             str(i), str(run_path), str(chunk_size), str(duration), 
-             str(pools_file), str(fraud_rate)],
+            [sys.executable, '-c', WORKER_DUAL_SCRIPT, 
+             str(i), str(output_dir_cpu), str(chunk_size), str(duration), 
+             str(pools_file), str(fraud_rate), str(output_dir_gpu)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         processes.append(p)
     
-    # Monitor progress
     start_time = time.time()
-    last_bytes = 0
-    last_time = start_time
+    total_generated_rows = 0
     
-    while not STOP_FLAG:
-        elapsed = time.time() - start_time
-        running = sum(1 for p in processes if p.poll() is None)
-        
-        if elapsed >= duration + 2 or running == 0:
-            break
-        
-        # Update stats every 1 second for live dashboard
-        if time.time() - last_time >= 1.0:
-            files = list(run_path.glob("worker_*.parquet"))
-            current_bytes = sum(f.stat().st_size for f in files) if files else 0
-            interval = time.time() - last_time
-            speed = ((current_bytes - last_bytes) / (1024**3)) / interval
-            total_gb = current_bytes / (1024**3)
+    try:
+        while not STOP_FLAG:
+            elapsed = time.time() - start_time
+            running = sum(1 for p in processes if p.poll() is None)
             
-            log(f"[{elapsed:5.1f}s] Files: {len(files):5d} | "
-                f"Size: {total_gb:6.2f} GB | Speed: {speed:5.2f} GB/s | Workers: {running}")
+            # Accurate row counting via file count
+            files = list(output_dir_cpu.glob("worker_*.parquet"))
+            total_generated_rows = len(files) * chunk_size
             
-            # Resource Monitoring
-            try:
-                cpu_percent = psutil.cpu_percent(interval=None)
-                mem_info = psutil.virtual_memory()
-                mem_gb = mem_info.used / (1024**3)
-                log(f"        CPU: {cpu_percent:5.1f}% | RAM: {mem_info.percent:5.1f}% ({mem_gb:.1f} GB)")
+            # Update Prometheus
+            GEN_COUNTER.inc(total_generated_rows - GEN_COUNTER._value.get())
+            tps = total_generated_rows / elapsed if elapsed > 0 else 0
+            TPS_GAUGE.set(tps)
+            
+            if total_generated_rows >= max_rows or running == 0 or elapsed >= duration:
+                break
                 
-                # Update Dashboard Stats
-                total_rows = len(files) * chunk_size
-                throughput = total_rows / elapsed if elapsed > 0 else 0
-                cpu_cores = (cpu_percent / 100.0) * psutil.cpu_count()
-                log_telemetry(total_rows, throughput, elapsed, cpu_cores, mem_gb, mem_info.percent)
-            except:
-                pass
-
-            last_bytes = current_bytes
-            last_time = time.time()
+            cpu_percent = psutil.cpu_percent()
+            mem_info = psutil.virtual_memory()
+            log_telemetry(total_generated_rows, tps, elapsed, 
+                          (cpu_percent/100)*psutil.cpu_count(), 
+                          mem_info.used/(1024**3), mem_info.percent)
+            
+            time.sleep(2)
+            
+    finally:
+        for p in processes: p.terminate()
         
-        time.sleep(1)
+    actual_rows = len(list(output_dir_cpu.glob("worker_*.parquet"))) * chunk_size
+    duration_sec = time.time() - start_time
     
-    # Cleanup - Wait for workers to finish naturally
-    log("Waiting for workers to sync and exit...")
-    for p in processes:
-        try:
-            p.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            p.terminate()
+    # 🔔 Atomic Status Tracking
+    status = {
+        "stage": "data-gather",
+        "state": "completed",
+        "records": actual_rows,
+        "duration_sec": round(duration_sec, 2),
+        "run_id": run_id,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    atomic_write(output_dir_cpu / "_status.json", json.dumps(status))
+    atomic_write(output_dir_gpu / "_status.json", json.dumps(status))
     
-    # Final stats
-    pools_file.unlink(missing_ok=True)
+    # 🚀 Atomic Completion Markers
+    atomic_write(output_dir_cpu / "_raw_complete")
+    atomic_write(output_dir_gpu / "_raw_complete")
     
-    log("=" * 70)
-    log("COMPLETE")
-    
-    # Final Summary for Master Script
-    files = list(run_path.glob("worker_*.parquet"))
-    total_bytes = sum(f.stat().st_size for f in files) if files else 0
-    total_gb = total_bytes / (1024**3)
-    
-    # Approx row count based on file size or metadata (or just chunk size * files * chunks/file if we knew)
-    # We can estimate rows: chunk_size * num_workers * (duration / per_chunk_time? no)
-    # Better: Open one file to get rows or trust the known chunk size.
-    # Since we are optimizing, opening every file is slow. 
-    # Let's just estimate: Size / (Size/Row). 
-    # Or count files * chunk_size (approximation if last chunk is full)
-    # Actually, we know chunk_size is passed to worker.
-    # Worker generates full chunks in loop.
-    # Let's count files.
-    
-    total_rows = len(files) * chunk_size 
-    
-    elapsed_total = time.time() - start_time
-    throughput_rows = total_rows / elapsed_total if elapsed_total > 0 else 0
-    
-    log(f"METRICS: Rows={total_rows} | Time={elapsed_total:.2f}s | Throughput={throughput_rows:.1f} rows/s | Size={total_gb:.2f} GB")
-    # Add explicit resource summary
-    mem_info = psutil.virtual_memory()
-    mem_gb = mem_info.used / (1024 ** 3)
-    
-    # Calculate Cores used
-    # cpu_percent is 0-100 system wide. 
-    # To get "Cores", generally for a process we sum per-cpu. 
-    # For system wide, 100% = All Cores. 
-    # So (percent / 100) * total_cores
-    cpu_cores = (psutil.cpu_percent() / 100.0) * psutil.cpu_count()
-    
-    log(f"METRICS: CPU={cpu_cores:.1f} Cores | RAM={mem_info.percent:.1f}% ({mem_gb:.2f} GB)")
-    log("=" * 70)
-    
-    # Final Stats update
-    log_telemetry(total_rows, total_rows/elapsed_total if elapsed_total > 0 else 0, elapsed_total, cpu_cores, mem_gb, mem_info.percent, status="Completed")
+    # 📦 Push Final Metrics to PushGateway
+    try:
+        push_to_gateway(push_gateway, job='data-gather', 
+                        grouping_key={'run_id': run_id}, registry=REGISTRY)
+        log("Metrics pushed to PushGateway.")
+    except Exception as e:
+        log(f"PushGateway failed: {e}")
 
+    log(f"COMPLETE: {actual_rows} rows generated and synced in {duration_sec:.2f}s.")
 
 if __name__ == "__main__":
     main()

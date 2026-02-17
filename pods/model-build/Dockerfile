@@ -9,9 +9,9 @@ RUN pip install --no-cache-dir xgboost>=2.0.0
 
 COPY train.py .
 
-ENV PREP_OUTPUT_DIR=/data/input
-ENV FA_MOUNT=/data/models
-ENV FEATURES_FILE=""
+ENV INPUT_DIR=/gpu/data/features
+ENV OUTPUT_DIR_CPU=/cpu/models
+ENV OUTPUT_DIR_GPU=/gpu/models
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "train.py"]

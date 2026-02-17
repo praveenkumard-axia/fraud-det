@@ -13,6 +13,7 @@ __pycache__/
 myenv/
 venv/
 env/
+.venv
 # IDE
 .vscode/
 .idea/
