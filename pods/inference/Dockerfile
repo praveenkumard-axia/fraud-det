@@ -6,7 +6,8 @@ RUN pip install --no-cache-dir \
     numpy>=1.26.0 \
     polars>=0.20.0 \
     xgboost>=2.0.0 \
-    psutil>=5.9.0
+    psutil>=5.9.0 \
+    tritonclient
 
 COPY client.py .
 

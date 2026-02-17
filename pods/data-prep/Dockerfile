@@ -8,6 +8,13 @@ ENV CUDF_LOGGING_LEVEL=CRITICAL
 ENV DASK_DISTRIBUTED__LOGGING__DISTRIBUTED=critical
 ENV PYTHONUNBUFFERED=1
 
+
+RUN pip install --no-cache-dir \
+    numpy>=1.26.0 \
+    pyarrow>=14.0.0 \
+    faker>=22.0.0 \
+    psutil
+
 WORKDIR /app
 COPY prepare.py .
 

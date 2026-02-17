@@ -5,7 +5,11 @@ FROM nvcr.io/nvidia/rapidsai/base:24.02-cuda12.0-py3.10
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir xgboost>=2.0.0
+RUN pip install --no-cache-dir xgboost>=2.0.0 \
+    numpy>=1.26.0 \
+    pyarrow>=14.0.0 \
+    faker>=22.0.0 \
+    psutil
 
 COPY train.py .
 
