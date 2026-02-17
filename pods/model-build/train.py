@@ -119,7 +119,7 @@ class ModelTrainer:
         self.output_path_cpu.mkdir(parents=True, exist_ok=True)
         self.output_path_gpu.mkdir(parents=True, exist_ok=True)
         
-        self.gpu_mode = torch.cuda.is_available()
+        self.gpu_mode = torch.cuda.is_available() and GPU_AVAILABLE
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
         
@@ -154,6 +154,9 @@ class ModelTrainer:
         if self.gpu_mode:
             import cudf
             df = cudf.from_pandas(df.to_pandas())
+        else:
+            # Fallback to Pandas for .iloc compatibility if on CPU
+            df = df.to_pandas()
         
         available_feats = [c for c in FEATURE_COLUMNS if c in df.columns]
         split_idx = int(len(df) * 0.8)

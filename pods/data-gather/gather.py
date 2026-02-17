@@ -237,7 +237,7 @@ schema = pa.schema([
 ])
 
 try:
-    while (time.time() - start) < duration:
+    while True:
         data = generate_chunk(pools, chunk_size, rng, fraud_rate, base_time)
         table = pa.Table.from_pydict(data, schema=schema)
         output_file = output_dir / f"worker_{worker_id:03d}_{file_count:05d}.parquet"

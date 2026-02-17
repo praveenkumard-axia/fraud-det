@@ -126,7 +126,8 @@ class DataPrepService:
         log("=" * 70)
 
         if self.gpu_mode:
-            self._init_dask()
+            # self._init_dask() # Removed: LocalCUDACluster problematic in container, using dask_cudf directly
+            pass
 
     def process_continuous(self):
         """Continuous processing loop."""
