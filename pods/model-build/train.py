@@ -233,8 +233,11 @@ def main():
         
         trainer.save_model(model, feats, metrics)
         
-        push_to_gateway(trainer.push_gateway, job='model-train', 
-                        grouping_key={'run_id': trainer.run_id}, registry=REGISTRY)
+        try:
+            push_to_gateway(trainer.push_gateway, job='model-train', 
+                            grouping_key={'run_id': trainer.run_id}, registry=REGISTRY)
+        except Exception as e:
+            log.warning(f"PushGateway Warning: {e}")
         
         log.info(f"COMPLETE: Model trained in {duration:.2f}s")
         

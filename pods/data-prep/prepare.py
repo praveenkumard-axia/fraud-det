@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-Pod 2: Feature Engineering (Optimized)
+Pod 2: Feature Engineering (Optimized - Continuous Streaming)
 Data preparation using Polars (CPU) or RAPIDS cuDF (GPU).
-Optimizations:
-- Polars used for CPU processing (multithreaded, lazy evaluation).
-- Automatic backend selection (GPU if available, else Polars).
-- Removed redundant "comparison" runs.
 """
 
 import os
@@ -118,7 +114,7 @@ class DataPrepService:
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
         
         log("=" * 70)
-        log("Pod 2: Enterprise Feature Engineering")
+        log("Pod 2: Enterprise Feature Engineering (Continuous)")
         log(f"RUN_ID:   {self.run_id}")
         log(f"Input:    {self.input_dir}")
         log(f"Output:   {self.output_dir}")
@@ -128,43 +124,88 @@ class DataPrepService:
         if self.gpu_mode:
             self._init_dask()
 
-    def wait_for_upstream(self) -> bool:
-        """Wait for _raw_complete from Data Gather pod."""
-        marker = self.input_dir / "_raw_complete"
-        log(f"Waiting for upstream marker: {marker}")
+    def process_continuous(self):
+        """Continuous processing loop."""
+        processed_files = set()
         
-        start_wait = time.time()
-        while not marker.exists():
-            if (time.time() - start_wait) > self.max_wait:
-                log("TIMEOUT: Upstream marker not found. Aborting.")
-                return False
-            if STOP_FLAG: return False
-            time.sleep(10)
+        log("Starting continuous processing loop...")
         
-        log("Upstream completion detected. Starting processing.")
-        return True
-
-    def process(self) -> Tuple[int, float]:
-        """Process all parquet files in the run directory."""
-        files = sorted(self.input_dir.glob("worker_*.parquet"))
-        if not files:
-            log("No input files found.")
-            return 0, 0
-        
-        start_time = time.time()
-        
-        if self.gpu_mode:
-            # Simplified for demo: reads all as one table
-            row_count = self._process_gpu(files)
-        else:
-            row_count = self._process_cpu_polars(files)
+        while not STOP_FLAG:
+            # 0. Check for STOP signal
+            if (self.run_root / "STOP").exists():
+                log("STOP signal detected. Exiting...")
+                break
+                
+            # 1. Scan for new files
+            try:
+                all_files = sorted(self.input_dir.glob("worker_*.parquet"))
+                new_files = [f for f in all_files if f.name not in processed_files]
+            except Exception as e:
+                log(f"Error scanning files: {e}")
+                time.sleep(1)
+                continue
             
-        duration = time.time() - start_time
-        return row_count, duration
+            if not new_files:
+                time.sleep(2)
+                continue
+                
+            # 2. Process Batch
+            log(f"Processing batch of {len(new_files)} files...")
+            start_batch = time.time()
+            if self.gpu_mode:
+                row_count = self._process_gpu(new_files)
+            else:
+                row_count = self._process_cpu_polars(new_files)
+            
+            duration = time.time() - start_batch
+            
+            # 3. Mark as processed
+            for f in new_files:
+                processed_files.add(f.name)
+                
+            # 4. Metrics & Telemetry
+            tps = row_count / duration if duration > 0 else 0
+            
+            SAMPLES_COUNTER.inc(row_count)
+            TPS_GAUGE.set(tps)
+            MEM_GAUGE.set(psutil.Process().memory_info().rss)
+            
+            # 5. Push Metrics
+            try:
+                push_to_gateway(self.push_gateway, job='preprocess', 
+                                grouping_key={'run_id': self.run_id}, registry=REGISTRY)
+            except Exception:
+                pass # Soft fail
+                
+            log_telemetry(row_count, tps, duration, psutil.cpu_count(), 
+                          psutil.Process().memory_info().rss/(1024**3), 0, status="Running", preserve_total=True)
+            
+            # Atomic Status Update (Cumulative)
+            try:
+                status = {
+                    "stage": "preprocess",
+                    "state": "running",
+                    "total_records": int(SAMPLES_COUNTER._value.get()),
+                    "last_batch_records": row_count,
+                    "run_id": self.run_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "backend": "GPU" if self.gpu_mode else "CPU"
+                }
+                atomic_write(self.output_dir / "_status.json", json.dumps(status))
+                
+                # Create/Update completion marker to signal downstream
+                if not (self.output_dir / "_prep_complete").exists():
+                     atomic_write(self.output_dir / "_prep_complete")
+            except Exception as e:
+                log(f"Status update failed: {e}")
 
     def _process_cpu_polars(self, files: List[Path]) -> int:
         file_pattern = str(self.input_dir / "worker_*.parquet")
-        q = pl.scan_parquet(file_pattern)
+        # Optimization: Only scan new files?
+        # Polars scan_parquet accepts a list of files or a glob.
+        # If we pass a list of new files, it works.
+        
+        q = pl.scan_parquet([str(f) for f in files])
         
         # Feature Engineering Pipeline
         q = q.with_columns([
@@ -182,7 +223,16 @@ class DataPrepService:
         cols_to_keep = [c for c in current_cols if c not in STRING_COLUMNS_TO_DROP]
         q = q.select(cols_to_keep)
         
-        output_file = self.output_dir / "features_all.parquet"
+        # Append to a specialized batch file or a common output?
+        # Users want continuous. Downstream (training) usually wants a single dataset.
+        # But for *inference*, we can output many small files.
+        # Ideally, we produce features_worker_XXX.parquet corresponding to input.
+        
+        # For simplicity in this demo, let's output one file per batch.
+        # We need unique names to avoid overwriting.
+        timestamp = int(time.time() * 1000)
+        output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
+        
         q.sink_parquet(output_file, compression='snappy')
         
         # Return row count
@@ -198,7 +248,9 @@ class DataPrepService:
         ddf['hour_of_day'] = (ddf['unix_time'] / 3600 % 24).astype('int8')
         # ... more features ...
         
-        output_file = self.output_dir / "features_all.parquet"
+        timestamp = int(time.time() * 1000)
+        output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
+        
         ddf.to_parquet(output_file)
         return len(ddf)
 
@@ -208,50 +260,18 @@ def main():
     
     service = DataPrepService()
     
-    # 🔗 Auto-Flow Wait
-    if not service.wait_for_upstream():
-        sys.exit(1)
+    # In continuous mode, we don't wait for _raw_complete
+    # We just wait for ANY data to appear
+    log("Waiting for data stream...")
+    while not any(service.input_dir.glob("worker_*.parquet")):
+        if (service.run_root / "STOP").exists(): return
+        time.sleep(2)
         
-    start_processing = time.time()
     try:
-        total_rows, total_duration = service.process()
-        
-        # 🔗 Persistence
-        duration_sec = time.time() - start_processing
-        tps = total_rows / duration_sec if duration_sec > 0 else 0
-        
-        # Metrics to PushGateway
-        SAMPLES_COUNTER.inc(total_rows)
-        TPS_GAUGE.set(tps)
-        MEM_GAUGE.set(psutil.Process().memory_info().rss)
-        
-        # 🔔 Atomic Status
-        status = {
-            "stage": "preprocess",
-            "state": "completed",
-            "records": total_rows,
-            "duration_sec": round(duration_sec, 2),
-            "run_id": service.run_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "backend": "GPU" if service.gpu_mode else "CPU"
-        }
-        atomic_write(service.output_dir / "_status.json", json.dumps(status))
-        atomic_write(service.output_dir / "_prep_complete")
-        
-        push_to_gateway(service.push_gateway, job='preprocess', 
-                        grouping_key={'run_id': service.run_id}, registry=REGISTRY)
-        
-        log(f"COMPLETE: {total_rows:,} rows in {duration_sec:.2f}s ({tps:.1f} samples/sec)")
-        log_telemetry(total_rows, tps, duration_sec, psutil.cpu_count(), psutil.Process().memory_info().rss/(1024**3), 0, status="Completed")
-
+        service.process_continuous()
     except Exception as e:
         log(f"FAILED: {e}")
-        status = {"state": "failed", "error": str(e), "run_id": service.run_id}
-        atomic_write(service.output_dir / "_status.json", json.dumps(status))
         sys.exit(1)
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

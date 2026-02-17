@@ -93,13 +93,6 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
-      - name: wait-for-raw
-        image: busybox
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/data/raw/_raw_complete ]; do echo waiting for data; sleep 5; done"]
-        volumeMounts:
-        - name: storage
-          mountPath: /fraud-benchmark
-      tolerations:
       - key: "dedicated"
         operator: "Equal"
         value: "gpu"
@@ -174,13 +167,6 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
-      - name: wait-for-raw
-        image: busybox
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/data/raw/_raw_complete ]; do echo waiting for data; sleep 5; done"]
-        volumeMounts:
-        - name: storage
-          mountPath: /fraud-benchmark
-      tolerations:
       - key: "dedicated"
         operator: "Equal"
         value: "gpu"

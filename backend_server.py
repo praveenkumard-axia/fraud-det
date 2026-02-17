@@ -281,23 +281,34 @@ async def run_pipeline_sequence():
     state.start_time = time.time()
     
     try:
-        # Stage 1
-        await run_k8s_job("data-gather", run_id)
+        # Continuous Pipeline: Launch EVERYTHING in parallel
+        # Each component handles its own dependencies (polling)
         
-        # Stage 2 (Parallel)
-        await asyncio.gather(
-            run_k8s_job("data-prep-cpu", run_id),
-            run_k8s_job("data-prep-gpu", run_id)
-        )
+        logger.info(f"Starting Continuous Pipeline {run_id}...")
         
-        # Stage 3
-        await run_k8s_job("model-train-gpu", run_id)
+        # 1. Generator (Infinite)
+        task_gather = asyncio.create_task(run_k8s_job("data-gather", run_id))
         
-        # Stage 4 (Parallel)
-        await asyncio.gather(
-            run_k8s_job("inference-cpu", run_id),
-            run_k8s_job("inference-gpu", run_id)
-        )
+        # Give generator a head start to create pools/dirs?
+        await asyncio.sleep(5)
+        
+        # 2. Prep (Infinite)
+        task_prep_cpu = asyncio.create_task(run_k8s_job("data-prep-cpu", run_id))
+        task_prep_gpu = asyncio.create_task(run_k8s_job("data-prep-gpu", run_id))
+        
+        # 3. Model Train (Runs once after data available, or repeatedly?)
+        # For now, we launch it. It should wait for _prep_complete (written by prep after batch 1)
+        task_train = asyncio.create_task(run_k8s_job("model-train-gpu", run_id))
+        
+        # 4. Inference (Infinite)
+        task_inf_cpu = asyncio.create_task(run_k8s_job("inference-cpu", run_id))
+        task_inf_gpu = asyncio.create_task(run_k8s_job("inference-gpu", run_id))
+        
+        # We do NOT await them, because they run forever (until stop).
+        # But we might want to track them?
+        # For this function to return, we just start them and let them run in background.
+        # But we should update state.
+        
         
     except Exception as e:
         logger.error(f"Pipeline Execution Failure: {e}")
@@ -477,7 +488,21 @@ async def stop_pipeline_control():
     state.is_running = False
     run_id = state.run_id or "run-default"
     
-    # Native K8s Deletion by Label
+    # 1. Signal Pods to Stop via Shared Volume
+    try:
+        # Create STOP marker in the run directory
+        run_dir = Path(f"/fraud-benchmark/runs/{run_id}") # Mounted path in backend
+        if run_dir.exists():
+             with open(run_dir / "STOP", "w") as f:
+                 f.write(datetime.now().isoformat())
+             logger.info(f"Signal STOP sent to {run_dir}")
+    except Exception as e:
+        logger.error(f"Failed to write STOP signal: {e}")
+
+    # 2. Wait briefly to allow pods to see the signal (optional, e.g. 5s)
+    await asyncio.sleep(5)
+
+    # 3. Native K8s Deletion by Label
     try:
         k8s_batch.delete_collection_namespaced_job(
             namespace="fraud-det",
@@ -486,7 +511,18 @@ async def stop_pipeline_control():
         )
     except: pass
     
-    return {"status": "stopped", "message": "Pipeline stop initiated"}
+    # 4. Cleanup Data (As requested by User)
+    try:
+        # We invoke a helper pod or use the backend's mount to delete
+        # Assuming backend mounts /fraud-benchmark at the same path
+        if run_dir.exists():
+            import shutil
+            shutil.rmtree(str(run_dir))
+            logger.info(f"Deleted data for run {run_id}")
+    except Exception as e:
+        logger.error(f"Failed to clean up data: {e}")
+
+    return {"status": "stopped", "message": "Pipeline stopped and data cleaned"}
 
 @app.post("/api/control/scale")
 async def scale(component: str = "all", cpu: str = "4", memory: str = "8Gi", gpu: int = 0):

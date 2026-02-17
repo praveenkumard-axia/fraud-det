@@ -341,8 +341,18 @@ def main():
             tps = total_generated_rows / elapsed if elapsed > 0 else 0
             TPS_GAUGE.set(tps)
             
-            if total_generated_rows >= max_rows or running == 0 or elapsed >= duration:
+            # Check for STOP file from Backend
+            if (run_root / "STOP").exists():
+                log("STOP signal detected in run directory. Exiting...")
                 break
+
+            if running == 0:
+                 # If workers died, restart them or break? 
+                 # For now, if all workers die, we break.
+                 break
+                 
+            # if total_generated_rows >= max_rows or running == 0 or elapsed >= duration:
+            #     break
                 
             cpu_percent = psutil.cpu_percent()
             mem_info = psutil.virtual_memory()
