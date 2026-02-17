@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, List, Tuple
 import yaml
 import tempfile
+import json
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,6 +102,9 @@ class PipelineState:
         
         # Lock for thread safety
         self.lock = threading.Lock()
+        
+        # Resource Overrides (Component -> {cpu, memory, gpu})
+        self.resource_overrides: Dict[str, Dict] = {}
     
     def generate_run_id(self):
         """Generate a central RUN_ID: run-YYYYMMDD-HHMMSS (UTC)"""
@@ -210,11 +214,12 @@ async def run_k8s_job(job_name: str, run_id: str):
             logger.error(f"Job {job_name} not found in benchmarks.yaml")
             return
 
-        # 3. Explicit RUN_ID injection into env vars (double-check)
+        # 3. Explicit RUN_ID injection into env vars
         for container in job_doc['spec']['template']['spec']['containers']:
             if 'env' not in container:
                 container['env'] = []
-            # Update or add RUN_ID
+            
+            # Inject RUN_ID
             run_id_found = False
             for env_var in container['env']:
                 if env_var['name'] == 'RUN_ID':
@@ -224,18 +229,56 @@ async def run_k8s_job(job_name: str, run_id: str):
             if not run_id_found:
                 container['env'].append({'name': 'RUN_ID', 'value': run_id})
 
+            # Apply Resource Overrides (Scaling)
+            if job_name in state.resource_overrides:
+                overrides = state.resource_overrides[job_name]
+                if 'resources' not in container:
+                    container['resources'] = {'limits': {}}
+                if 'limits' not in container['resources']:
+                    container['resources']['limits'] = {}
+                
+                # Apply CPU/Mem/GPU
+                if 'cpu' in overrides: container['resources']['limits']['cpu'] = overrides['cpu']
+                if 'memory' in overrides: container['resources']['limits']['memory'] = overrides['memory']
+                if 'gpu' in overrides and int(overrides['gpu']) > 0:
+                     container['resources']['limits']['nvidia.com/gpu'] = overrides['gpu']
+                elif 'gpu' in overrides and int(overrides['gpu']) == 0:
+                     # Remove GPU limit if scaled to 0
+                     container['resources']['limits'].pop('nvidia.com/gpu', None)
+
         # 4. Create Job
         k8s_batch.create_namespaced_job(namespace="fraud-det", body=job_doc)
         logger.info(f"Native Job {job_name} created successfully with RUN_ID={run_id}")
         
+        # 5. Wait for Completion (Pipeline Integrity)
+        logger.info(f"Waiting for {job_name} to complete...")
+        while True:
+            await asyncio.sleep(3) # Poll interval
+            try:
+                status = k8s_batch.read_namespaced_job_status(job_name, "fraud-det")
+                if status.status.succeeded:
+                    logger.info(f"Job {job_name} succeeded.")
+                    break
+                if status.status.failed:
+                    logger.error(f"Job {job_name} failed.")
+                    # In a real pipeline, we might want to throw here, but for now we log and proceed
+                    # to allow partial pipeline data inspection
+                    break
+            except client.exceptions.ApiException as e:
+                # Job might disappear or network issue
+                logger.warning(f"Error polling job {job_name}: {e}")
+                
     except Exception as e:
         logger.error(f"K8s Native Creation Failed for {job_name}: {e}")
 
 async def run_pipeline_sequence():
     """Enterprise Pipeline Orchestration (Native K8s)"""
     state.is_running = True
+    # run_id is passed in or generated BEFORE this function
+    run_id = state.run_id
+    if not run_id:
+        run_id = state.generate_run_id()
     state.start_time = time.time()
-    run_id = state.generate_run_id()
     
     try:
         # Stage 1
@@ -419,8 +462,11 @@ async def start_pipeline_control():
     if state.is_running:
         return {"status": "already_running", "run_id": state.run_id}
     
+    # Generate ID immediately so UI gets it
+    new_run_id = state.generate_run_id()
+    
     asyncio.create_task(run_pipeline_sequence())
-    return {"status": "started", "run_id": state.run_id}
+    return {"status": "started", "run_id": new_run_id}
 
 @app.post("/api/run/stop")
 @app.post("/api/control/stop")
@@ -444,9 +490,19 @@ async def stop_pipeline_control():
 
 @app.post("/api/control/scale")
 async def scale(component: str = "all", cpu: str = "4", memory: str = "8Gi", gpu: int = 0):
-    """Scaling Stub - Production would recreate Jobs"""
+    """Update resource limits for next run (and restart if requested - not impl here)"""
     logger.info(f"Scale request: {component} -> CPU:{cpu} MEM:{memory} GPU:{gpu}")
-    return {"status": "scaled", "component": component}
+    
+    # Store in state for next run_k8s_job execution
+    if component == "all":
+        # Apply to all relevant jobs
+        jobs = ["data-prep-cpu", "data-prep-gpu", "inference-cpu", "inference-gpu", "model-train-gpu"]
+        for j in jobs:
+            state.resource_overrides[j] = {"cpu": cpu, "memory": memory, "gpu": gpu}
+    else:
+        state.resource_overrides[component] = {"cpu": cpu, "memory": memory, "gpu": gpu}
+        
+    return {"status": "scaled", "component": component, "overrides": state.resource_overrides.get(component)}
 
 @app.post("/api/control/throttle")
 async def throttle(percent: int = 100):
@@ -466,21 +522,25 @@ async def reset_data_control():
 async def resource_bounds():
     return {
         "cpu": {"min": 1, "max": 64},
-        "cpu_max": 100, # Legacy compat
+        "cpu_max": 256,
         "memory_gb": {"min": 1, "max": 512},
-        "gpu": {"min": 0, "max": 2},
-        "gpu_max": 2, # Legacy compat
+        "gpu": {"min": 0, "max": 8},
+        "gpu_max": 8,
         "storage_max_tb": 100
     }
 
 @app.get("/api/resources/{component}")
 async def resource_usage(component: str):
+    # Return active override or default
+    override = state.resource_overrides.get(component, {})
+    
     return {
         "component": component,
-        "cpu": 0.5 if "gpu" not in component else 0.2,
-        "memory": 0.7,
-        "gpu": 0.3 if "gpu" in component else 0.0,
-        "cpu_util": 0.55,
+        # Return override if exists, else estimate defaults
+        "cpu": override.get("cpu", "2"), 
+        "memory": override.get("memory", "4Gi"),
+        "gpu": override.get("gpu", 0),
+        "cpu_util": 0.55, # Mock/Real mix
         "memory_util": 0.68,
         "gpu_util": 0.32 if "gpu" in component else 0
     }
@@ -515,7 +575,7 @@ async def shutdown_event():
         try: await ws.close()
         except: pass
 
-@app.post("/api/control/reset-data")
+@app.post("/api/control/reset-data-legacy") # Rename/Remove duplicate
 async def reset_data():
     state.reset()
     return {"success": True, "message": "Metrics reset"}
