@@ -304,9 +304,10 @@ def main():
     pools_file = generate_pools(output_dir_cpu)
     
     # Modified Worker for Dual Atomic Writes
+    # FIX: Ensure indentation matches the surrounding code (8 spaces)
     WORKER_DUAL_SCRIPT = WORKER_SCRIPT.replace(
-        "pq.write_table(table, output_file, compression='snappy')",
-        "tmp_file = str(output_file) + '.tmp'\n" +
+        "        pq.write_table(table, output_file, compression='snappy')",
+        "        tmp_file = str(output_file) + '.tmp'\n" +
         "        pq.write_table(table, tmp_file, compression='snappy')\n" +
         "        os.rename(tmp_file, output_file)\n" +
         "        import shutil\n" +
@@ -320,7 +321,7 @@ def main():
             [sys.executable, '-c', WORKER_DUAL_SCRIPT, 
              str(i), str(output_dir_cpu), str(chunk_size), str(duration), 
              str(pools_file), str(fraud_rate), str(output_dir_gpu)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            stdout=subprocess.DEVNULL, stderr=None 
         )
         processes.append(p)
     
