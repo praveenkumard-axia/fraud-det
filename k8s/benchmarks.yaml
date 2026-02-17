@@ -23,6 +23,11 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
       containers:
       - name: gather
         image: pduraiswamy16722/fraud-data-gather:latest
