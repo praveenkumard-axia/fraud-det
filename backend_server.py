@@ -20,6 +20,7 @@ import tempfile
 import json
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -341,7 +342,7 @@ async def get_prometheus_metric(query: str) -> float:
 
 @app.get("/")
 def root():
-    return {"status": "Fraud Detection Benchmark Backend Online"}
+    return FileResponse(BASE_DIR / "dashboard-v4-preview.html")
 
 @app.get("/api/business/metrics")
 async def get_business_metrics():
@@ -422,17 +423,28 @@ async def get_machine_metrics():
     gpu_tp = fb_read * 2 # GPU usually reads faster
     
     return {
-        "cpu_util": round(cpu_util, 1),
-        "cpu_utilization": round(cpu_util / 100.0, 2), # Normalized for 0-1 charts
-        "gpu_util": round(gpu_util, 1),
-        "gpu_utilization": round(gpu_util / 100.0, 2),
-        "flashblade_util": round(fb_util_raw * 100, 1) if fb_util_raw else 0,
-        "flashblade_utilization": fb_util_raw if fb_util_raw else 0,
-        
-        "cpu_throughput": round(cpu_tp, 1),
-        "gpu_throughput": round(gpu_tp, 1),
-        "flashblade_read_mbps": round(fb_read, 1),
-        "flashblade_write_mbps": round(fb_write, 1)
+        "throughput": {
+            "cpu": int(cpu_tp * 200), # Mock scale for TPS from MB/s
+            "gpu": int(gpu_tp * 500)
+        },
+        "FlashBlade": {
+            "read_mbps": round(fb_read, 1),
+            "write_mbps": round(fb_write, 1),
+            "util": round(fb_util_raw * 100, 1) if fb_util_raw else 0
+        },
+        "Model": {
+            "transactions_analyzed": state.telemetry.get("txns_scored", 0),
+            "high_risk_txn_rate": 0.05, # Default/Mock
+            "metadata": {
+                "elapsed_hours": state.telemetry.get("total_elapsed", 0) / 3600.0,
+                "dataset_version": "v4.2"
+            }
+        },
+        "utilization": { # For the comparison chart
+             "cpu": float(cpu_util),
+             "gpu": float(gpu_util),
+             "flashblade": round(fb_util_raw * 100, 1) if fb_util_raw else 0
+        }
     }
 
 @app.get("/api/run/status")

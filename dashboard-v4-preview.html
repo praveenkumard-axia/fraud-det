@@ -2191,7 +2191,7 @@
       // before the user explicitly starts the pipeline.
       if (isPollingAllowed) {
         fetchBusinessMetrics();
-        businessPollTimer = setInterval(fetchBusinessMetrics, 5000);
+        businessPollTimer = setInterval(fetchBusinessMetrics, 1000);
       }
     }
     function stopBusinessPoll() {
@@ -2374,7 +2374,7 @@
       // Prevents immediate API calls on page load/tab switch; polling begins after user clicks Start.
       if (isPollingAllowed) {
         fetchMachineMetrics();
-        machinePollTimer = setInterval(fetchMachineMetrics, 5000);
+        machinePollTimer = setInterval(fetchMachineMetrics, 1000);
       }
     }
     function stopMachinePoll() {
