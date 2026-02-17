@@ -4,6 +4,9 @@ metadata:
   name: data-gather
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -31,17 +34,16 @@ spec:
       - key: "node-role.kubernetes.io/control-plane"
         operator: "Exists"
         effect: "NoSchedule"
-      tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
-        effect: "NoSchedule"
       containers:
       - name: gather
         image: pduraiswamy16722/fraud-data-gather:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -63,6 +65,9 @@ metadata:
   name: data-prep-cpu
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -99,6 +104,13 @@ spec:
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -122,6 +134,9 @@ metadata:
   name: data-prep-gpu
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -170,7 +185,13 @@ spec:
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
         resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
           limits:
+            cpu: "8"
+            memory: "16Gi"
             nvidia.com/gpu: 1
         volumeMounts:
         - name: storage
@@ -186,6 +207,9 @@ metadata:
   name: model-train-gpu
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -232,7 +256,13 @@ spec:
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
         resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
           limits:
+            cpu: "8"
+            memory: "16Gi"
             nvidia.com/gpu: 1
         volumeMounts:
         - name: storage
@@ -248,6 +278,9 @@ metadata:
   name: inference-cpu
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -284,6 +317,13 @@ spec:
       containers:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -305,6 +345,9 @@ metadata:
   name: inference-gpu
   namespace: fraud-det
 spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
   template:
     metadata:
       annotations:
@@ -349,7 +392,13 @@ spec:
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
         resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
           limits:
+            cpu: "8"
+            memory: "16Gi"
             nvidia.com/gpu: 1
         volumeMounts:
         - name: storage
