@@ -2018,7 +2018,13 @@
       }
       if (document.getElementById('tech-backlog')) document.getElementById('tech-backlog').textContent = 'Backlog: ' + fmtNum(rawBacklog);
 
-      const fb = (data.fb && data.fb.length) ? data.fb[data.fb.length - 1] : {};
+      // Handle FB metrics (can be array or object from refactored backend)
+      let fb = {};
+      if (data.FlashBlade && !Array.isArray(data.FlashBlade)) {
+        fb = data.FlashBlade; // New dictionary format
+      } else if (data.fb && data.fb.length) {
+        fb = data.fb[data.fb.length - 1]; // Old array format
+      }
       const fbUtil = fb.util || 0;
       if (document.getElementById('fb-read')) document.getElementById('fb-read').textContent = (fb.read_mbps ?? fb.throughput_mbps ?? 0).toFixed(1) + ' MB/s';
       if (document.getElementById('fb-write')) document.getElementById('fb-write').textContent = (fb.write_mbps ?? fb.throughput_mbps ?? 0).toFixed(1) + ' MB/s';
@@ -2207,6 +2213,10 @@
         const j = await r.json();
         // Debug: log throughput payload to browser console to help track "stuck" values
         try { console.debug("fetchMachineMetrics() -> throughput:", j.throughput, "model:", j.Model); } catch (e) { /* ignore */ }
+
+        // Drive Dashboard UI updates via polling (since WS is alert-only)
+        updateDashboard(j);
+
         const el = (id) => document.getElementById(id);
         const t = j.throughput || {};
         const fb = j.FlashBlade || {};

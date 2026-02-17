@@ -423,6 +423,8 @@ async def get_machine_metrics():
     gpu_tp = fb_read * 2 # GPU usually reads faster
     
     return {
+        "is_running": state.is_running,
+        "elapsed_sec": (time.time() - state.start_time) if state.start_time else 0,
         "throughput": {
             "cpu": int(cpu_tp * 200), # Mock scale for TPS from MB/s
             "gpu": int(gpu_tp * 500)
@@ -431,6 +433,16 @@ async def get_machine_metrics():
             "read_mbps": round(fb_read, 1),
             "write_mbps": round(fb_write, 1),
             "util": round(fb_util_raw * 100, 1) if fb_util_raw else 0
+        },
+        "Generation": {
+            "no_of_generated": state.telemetry.get("generated", 0)
+        },
+        "Preparation": {
+             "no_of_transformed": state.telemetry.get("data_prep_cpu", 0) + state.telemetry.get("data_prep_gpu", 0)
+        },
+        "Inference": {
+            "fraud": state.telemetry.get("fraud_blocked", 0),
+            "non_fraud": max(0, state.telemetry.get("txns_scored", 0) - state.telemetry.get("fraud_blocked", 0))
         },
         "Model": {
             "transactions_analyzed": state.telemetry.get("txns_scored", 0),
