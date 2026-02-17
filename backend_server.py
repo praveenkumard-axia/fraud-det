@@ -200,7 +200,7 @@ async def run_k8s_job(job_name: str, run_id: str):
             if e.status != 404: raise
 
         # 2. Load and Template Manifest
-        manifest_path = BASE_DIR / "k8s" / "benchmarks.yaml"
+        manifest_path = BASE_DIR / "k8s" / "jobs.yaml"
         with open(manifest_path, 'r') as f:
             full_manifest = f.read()
         

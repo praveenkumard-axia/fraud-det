@@ -238,7 +238,8 @@ class DataPrepService:
         timestamp = int(time.time() * 1000)
         output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
         
-        q.sink_parquet(output_file, compression='snappy')
+        q.sink_parquet(str(output_file) + ".tmp", compression='snappy')
+        os.rename(str(output_file) + ".tmp", output_file)
         
         # Return row count
         return pl.read_parquet(output_file, columns=["is_fraud"]).shape[0]
@@ -274,7 +275,8 @@ class DataPrepService:
         timestamp = int(time.time() * 1000)
         output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
         
-        ddf.to_parquet(output_file)
+        ddf.to_parquet(str(output_file) + ".tmp")
+        os.rename(str(output_file) + ".tmp", output_file)
         return len(ddf)
 
 def main():

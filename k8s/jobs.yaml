@@ -1,0 +1,423 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-gather
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: gather
+        image: pduraiswamy16722/fraud-data-gather:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: EXECUTION_TYPE
+          value: "cpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-prep-cpu
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: prep
+        image: pduraiswamy16722/fraud-data-prep:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: FORCE_CPU
+          value: "true"
+        - name: EXECUTION_TYPE
+          value: "cpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/raw"
+        - name: OUTPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/features"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-prep-gpu
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      initContainers:
+      - name: fix-permissions
+        image: busybox
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: prep
+        image: pduraiswamy16722/fraud-data-prep:latest
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: FORCE_CPU
+          value: "false"
+        - name: EXECUTION_TYPE
+          value: "gpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/raw"
+        - name: OUTPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-train-gpu
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      initContainers:
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      - name: wait-for-prep
+        image: busybox
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/data/features/_prep_complete ]; do echo waiting for prep; sleep 5; done"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: train
+        image: pduraiswamy16722/fraud-model-build:latest
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: EXECUTION_TYPE
+          value: "gpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        - name: INPUT_DIR
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
+        - name: OUTPUT_DIR_CPU
+          value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/models"
+        - name: OUTPUT_DIR_GPU
+          value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/models"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: inference-cpu
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      - name: wait-for-model
+        image: busybox
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: infer
+        image: pduraiswamy16722/fraud-inference:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: EXECUTION_TYPE
+          value: "cpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: inference-gpu
+  namespace: fraud-det
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+      labels:
+        run_id: "run-default"
+        app: fraud-benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: check-storage
+        image: busybox
+        command: ["sh", "-c", "ls -la /fraud-benchmark"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      - name: wait-for-model
+        image: busybox
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: infer
+        image: pduraiswamy16722/fraud-inference:latest
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        - name: EXECUTION_TYPE
+          value: "gpu"
+        - name: PUSHGATEWAY_URL
+          value: "10.23.181.153:9091"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
