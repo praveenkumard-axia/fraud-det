@@ -17,7 +17,7 @@ import pickle
 import psutil
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pyarrow as pa
