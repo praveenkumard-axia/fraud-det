@@ -14,7 +14,9 @@ RUN pip install --no-cache-dir \
     pyarrow>=14.0.0 \
     faker>=22.0.0 \
     psutil \
-    prometheus-client
+    prometheus-client \
+    pandas \
+    polars
 
 WORKDIR /app
 COPY prepare.py .

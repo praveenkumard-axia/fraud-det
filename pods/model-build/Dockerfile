@@ -10,7 +10,9 @@ RUN pip install --no-cache-dir xgboost>=2.0.0 \
     pyarrow>=14.0.0 \
     faker>=22.0.0 \
     psutil \
-    prometheus-client
+    prometheus-client \
+    polars \
+    pandas 
 
 COPY train.py .
 
