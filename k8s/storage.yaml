@@ -4,7 +4,7 @@ metadata:
   name: fraud-benchmark-pv
 spec:
   capacity:
-    storage: 1Ti
+    storage: 20Ti
   accessModes:
     - ReadWriteMany
   nfs:
