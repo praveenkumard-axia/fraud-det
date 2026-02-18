@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from kubernetes import client, config, utils
+from prometheus_client import make_asgi_app
 
 # Structured Logging
 logging.basicConfig(
@@ -60,6 +61,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Expose Prometheus Metrics
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 # ==================== Data Models ====================

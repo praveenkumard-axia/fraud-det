@@ -22,6 +22,8 @@ spec:
       initContainers:
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -37,6 +39,8 @@ spec:
       containers:
       - name: gather
         image: pduraiswamy16722/fraud-data-gather:latest
+
+        imagePullPolicy: IfNotPresent
         resources:
           requests:
             cpu: "1"
@@ -83,12 +87,16 @@ spec:
       initContainers:
       - name: fix-permissions
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -104,6 +112,8 @@ spec:
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
+
+        imagePullPolicy: IfNotPresent
         resources:
           requests:
             cpu: "1"
@@ -158,15 +168,21 @@ spec:
       initContainers:
       - name: check-gpu
         image: nvidia/cuda:12.2.1-base-ubuntu22.04
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -185,6 +201,8 @@ spec:
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
+
+        imagePullPolicy: IfNotPresent
         env:
         - name: RUN_ID
           value: "run-default"
@@ -241,15 +259,21 @@ spec:
       initContainers:
       - name: check-gpu
         image: nvidia/cuda:12.2.1-base-ubuntu22.04
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: wait-for-prep
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/data/features/_prep_complete ]; do echo waiting for prep; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -268,6 +292,8 @@ spec:
       containers:
       - name: train
         image: pduraiswamy16722/fraud-model-build:latest
+
+        imagePullPolicy: IfNotPresent
         env:
         - name: RUN_ID
           value: "run-default"
@@ -322,12 +348,16 @@ spec:
       initContainers:
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -343,6 +373,8 @@ spec:
       containers:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
+
+        imagePullPolicy: IfNotPresent
         resources:
           requests:
             cpu: "1"
@@ -389,12 +421,16 @@ spec:
       initContainers:
       - name: check-storage
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
+
+        imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -410,6 +446,8 @@ spec:
       containers:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
+
+        imagePullPolicy: IfNotPresent
         env:
         - name: RUN_ID
           value: "run-default"
