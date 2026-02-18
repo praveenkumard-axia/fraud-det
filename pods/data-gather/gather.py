@@ -312,7 +312,10 @@ def main():
         "        pq.write_table(table, tmp_file, compression='snappy')\n" +
         "        os.rename(tmp_file, output_file)\n" +
         "        import shutil\n" +
-        "        shutil.copy(output_file, Path(sys.argv[7]) / output_file.name)"
+        "        dst_path = Path(sys.argv[7]) / output_file.name\n" +
+        "        tmp_dst = str(dst_path) + '.tmp'\n" +
+        "        shutil.copy(output_file, tmp_dst)\n" +
+        "        os.rename(tmp_dst, dst_path)"
     )
     
     log(f"Launching {num_workers} workers...")

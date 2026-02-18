@@ -144,6 +144,8 @@ class DataPrepService:
             # 1. Scan for new files
             try:
                 all_files = sorted(self.input_dir.glob("worker_*.parquet"))
+                # Filter out temp files from atomic writes just in case
+                all_files = [f for f in all_files if not f.name.endswith('.tmp')]
                 new_files = [f for f in all_files if f.name not in processed_files]
             except Exception as e:
                 log(f"Error scanning files: {e}")
@@ -247,7 +249,11 @@ class DataPrepService:
     def _process_gpu(self, files: List[Path]) -> int:
         # Simplified dask_cudf path
         import dask_cudf
-        ddf = dask_cudf.read_parquet([str(f) for f in files])
+        try:
+            ddf = dask_cudf.read_parquet([str(f) for f in files])
+        except Exception as e:
+            log(f"Failed to read batch (skipping): {e}")
+            return 0
         
         # Feature Engineering Pipeline (GPU)
         ddf['amt_log'] = ddf['amt'].map_partitions(lambda s: cp.log1p(s))
