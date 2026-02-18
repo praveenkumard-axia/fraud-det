@@ -303,14 +303,18 @@ async def monitor_job_logs(job_name: str, run_id: str):
                 asyncio.run_coroutine_threadsafe(broadcast_alert(line, level="log"), loop)
 
                 if "[TELEMETRY]" in line:
-                    try:
-                        # [TELEMETRY] stage=... | rows=123 | ...
-                        parts = line.split("|")
-                        for p in parts:
-                            if "rows=" in p:
-                                val = int(p.split("=")[1].strip())
-                                state.telemetry[tele_key] = val
-                    except: pass
+                    data = parse_telemetry_line(line)
+                    if data:
+                        # Update specific telemetry keys based on stage/status
+                        with state.lock:
+                            if "rows" in data:
+                                state.telemetry[tele_key] = data["rows"]
+                            if "throughput" in data:
+                                state.telemetry["throughput"] = data["throughput"]
+                            if "cpu_cores" in data:
+                                state.telemetry["cpu_percent"] = data["cpu_cores"]
+                            if "ram_percent" in data:
+                                state.telemetry["ram_percent"] = data["ram_percent"]
             w.stop()
 
         await asyncio.to_thread(tail_and_parse)
@@ -783,6 +787,27 @@ async def start_pipeline_control():
     
     asyncio.create_task(run_pipeline_sequence())
     return {"status": "started", "run_id": new_run_id}
+
+@app.on_event("startup")
+async def startup_event():
+    """Auto-detect latest run on startup for dashboard continuity"""
+    try:
+        runs_dir = Path("/fraud-benchmark/runs")
+        if runs_dir.exists():
+            runs = sorted([d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")], 
+                          key=lambda x: x.name, reverse=True)
+            if runs:
+                latest_run = runs[0].name
+                with state.lock:
+                    if not state.run_id or state.run_id == "run-default":
+                        state.run_id = latest_run
+                        logger.info(f"Auto-adopted existing run: {latest_run}")
+                
+                # Start log monitor for adopted run components
+                for job in ["data-gather", "data-prep-cpu", "data-prep-gpu", "model-train-gpu", "inference-cpu", "inference-gpu"]:
+                    asyncio.create_task(monitor_job_logs(job, latest_run))
+    except Exception as e:
+        logger.warning(f"Startup recovery failed: {e}")
 
 @app.post("/api/run/stop")
 @app.post("/api/control/stop")

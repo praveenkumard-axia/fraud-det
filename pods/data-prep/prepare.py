@@ -50,12 +50,12 @@ def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, sta
             # We used to parse logs, but now we should ideally use a state file.
             # However, for backward compatibility with the user's setup:
             try:
-                stats_path = Path("stats.json")
-                if stats_path.exists():
-                    with open(stats_path, "r") as f:
+                status_path = Path("_status.json")
+                if status_path.exists():
+                    with open(status_path, "r") as f:
                         prev_data = json.load(f)
-                        if prev_data.get("stage") == "Data Prep":
-                            previous_total = prev_data.get("rows", 0)
+                        if prev_data.get("stage") == "preprocess":
+                            previous_total = prev_data.get("total_records", 0)
             except:
                 pass
         
@@ -225,16 +225,23 @@ class DataPrepService:
             
             # Atomic Status Update (Cumulative)
             try:
+                total_records = int(SAMPLES_COUNTER._value.get())
                 status = {
                     "stage": "preprocess",
                     "state": "running",
-                    "total_records": int(SAMPLES_COUNTER._value.get()),
+                    "total_records": total_records,
                     "last_batch_records": row_count,
                     "run_id": self.run_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "backend": "GPU" if self.gpu_mode else "CPU"
                 }
                 atomic_write(self.output_dir / "_status.json", json.dumps(status))
+                # Also write to local directory for log_telemetry to pick up next time
+                atomic_write(Path("_status.json"), json.dumps(status))
+                # Create/Update completion marker to signal downstream
+                if not (self.output_dir / "_prep_ready_for_train").exists() and total_records >= 1000:
+                     log("Threshold reached. Signaling ready-for-train.")
+                     atomic_write(self.output_dir / "_prep_ready_for_train")
             except Exception as e:
                 log(f"Status update failed: {e}")
 

@@ -38,12 +38,12 @@ def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, sta
         previous_total = 0
         if preserve_total:
             try:
-                stats_path = Path("stats.json")
-                if stats_path.exists():
-                    with open(stats_path, "r") as f:
+                status_path = Path("_status.json")
+                if status_path.exists():
+                    with open(status_path, "r") as f:
                         prev_data = json.load(f)
-                        if prev_data.get("stage") == "Model Train":
-                            previous_total = prev_data.get("rows", 0)
+                        if prev_data.get("stage") == "model-train":
+                            previous_total = prev_data.get("total_records", 0)
             except:
                 pass
         
