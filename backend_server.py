@@ -257,10 +257,11 @@ async def monitor_job_logs(job_name: str, run_id: str):
         tele_key = mapping.get(job_name)
         if not tele_key: return
 
-        # 1. Wait for pod to be RUNNING and container to be READY
+        # 1. Wait for pod to be RUNNING and container to be READY (Filter by RUN_ID)
         pod_name = None
         for _ in range(30): # 60 seconds wait
-            p_list = k8s_core.list_namespaced_pod(namespace="fraud-det", label_selector=f"job-name={job_name}")
+            label_selector = f"job-name={job_name},run_id={run_id}"
+            p_list = k8s_core.list_namespaced_pod(namespace="fraud-det", label_selector=label_selector)
             if p_list.items:
                 pod = p_list.items[0]
                 # Check status
@@ -286,9 +287,21 @@ async def monitor_job_logs(job_name: str, run_id: str):
         # 2. Stream logs in a separate thread to avoid blocking the event loop
         def tail_and_parse():
             w = watch.Watch()
+            # Capture the event loop to schedule broadcasts back into it
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            logger.info(f"Starting log stream for {pod_name}...")
             for event in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
                 if not state.is_running: break
                 line = event
+                
+                # Emit every log line to WebSockets for real-time visualization
+                asyncio.run_coroutine_threadsafe(broadcast_alert(line, level="log"), loop)
+
                 if "[TELEMETRY]" in line:
                     try:
                         # [TELEMETRY] stage=... | rows=123 | ...
@@ -415,6 +428,9 @@ async def run_pipeline_sequence():
         
         # 1. Fresh Start: Cleanup stale markers
         await cleanup_pipeline_markers(run_id)
+        
+        # 1.5 Start WebSocket Telemetry Broadcast Loop
+        asyncio.create_task(periodic_telemetry_broadcast())
         
         # 2. Phase 1: Ingest & Preprocess (Start background jobs)
         logger.info("PHASE 1: Starting Data Ingest & Preprocessing...")
@@ -865,6 +881,23 @@ async def broadcast_alert(msg: str, level: str = "info"):
     for ws in active_ws:
         try: await ws.send_text(payload)
         except: pass
+
+async def periodic_telemetry_broadcast():
+    """Background task to push full state to all WebSockets every second"""
+    logger.info("Starting periodic telemetry broadcast loop...")
+    while state.is_running:
+        if active_ws:
+            try:
+                # Use the existing metrics aggregator
+                data = await get_machine_metrics()
+                payload = json.dumps(data)
+                for ws in active_ws:
+                    try: await ws.send_text(payload)
+                    except: pass
+            except Exception as e:
+                logger.error(f"WS Broadcast error: {e}")
+        await asyncio.sleep(1)
+    logger.info("Telemetry broadcast loop stopped.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
