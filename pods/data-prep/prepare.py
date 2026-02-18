@@ -59,7 +59,9 @@ def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, sta
             except:
                 pass
         
-        total_rows = previous_total + rows if preserve_total else rows
+        total_rows = int(SAMPLES_COUNTER._value.get())
+        if preserve_total:
+             total_rows += previous_total
         telemetry = (
             f"[TELEMETRY] stage=Data Prep | status={status} | rows={int(total_rows)} | "
             f"throughput={int(throughput)} | elapsed={round(elapsed, 1)} | "

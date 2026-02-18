@@ -531,7 +531,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"

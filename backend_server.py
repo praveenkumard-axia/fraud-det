@@ -111,6 +111,9 @@ class PipelineState:
         # Lock for thread safety
         self.lock = threading.Lock()
         
+        # Guard for log monitors
+        self.active_monitors: set = set()
+        
         # Resource Overrides (Component -> {cpu, memory, gpu})
         self.resource_overrides: Dict[str, Dict] = {}
     
@@ -263,6 +266,13 @@ async def monitor_job_logs(job_name: str, run_id: str):
         tele_key = mapping.get(job_name)
         if not tele_key: return
 
+        monitor_id = f"{job_name}:{run_id}"
+        with state.lock:
+            if monitor_id in state.active_monitors:
+                logger.info(f"Monitor already active for {monitor_id}. Skipping.")
+                return
+            state.active_monitors.add(monitor_id)
+
         # 1. Wait for pod to be RUNNING and container to be READY (Filter by RUN_ID)
         pod_name = None
         for _ in range(30): # 60 seconds wait
@@ -302,6 +312,8 @@ async def monitor_job_logs(job_name: str, run_id: str):
                     
                     # Emit every log line to WebSockets for real-time visualization
                     asyncio.run_coroutine_threadsafe(broadcast_alert(line, level="log"), loop)
+                    if "Updated telemetry" not in line: # Avoid double log in terminal
+                        logger.debug(f"[{job_name}] {line[:100]}")
 
                     if "[TELEMETRY]" in line:
                         data = parse_telemetry_line(line)
