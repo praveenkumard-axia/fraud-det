@@ -21,9 +21,19 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+      - name: fix-permissions
+        image: busybox
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
@@ -99,8 +109,12 @@ spec:
       initContainers:
       - name: fix-permissions
         image: busybox
-        imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/run-default && chmod 777 /fraud-benchmark/runs/run-default || true"]
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -195,8 +209,12 @@ spec:
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
         image: busybox
-        imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/run-default && chmod 777 /fraud-benchmark/runs/run-default || true"]
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -296,9 +314,19 @@ spec:
             nvidia.com/gpu: 1
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
+      - name: fix-permissions
+        image: busybox
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
@@ -306,7 +334,6 @@ spec:
           mountPath: /fraud-benchmark
       - name: wait-for-prep
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ $(ls /fraud-benchmark/runs/run-default/gpu/data/raw | wc -l) -ge 1000 ]; do echo waiting for 1k files; sleep 10; done"]
         volumeMounts:
@@ -391,9 +418,19 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+      - name: fix-permissions
+        image: busybox
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
@@ -401,7 +438,6 @@ spec:
           mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
@@ -475,9 +511,19 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+      - name: fix-permissions
+        image: busybox
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
@@ -485,7 +531,6 @@ spec:
           mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
