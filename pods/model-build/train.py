@@ -70,8 +70,6 @@ try:
 except Exception as e:
     print(f"WARNING: GPU libraries failed to import: {e}")
     GPU_AVAILABLE = False
-
-# Features for model training (aligned with prepare.py output)
 FEATURE_COLUMNS = [
     'amt', 'lat', 'long', 'city_pop', 'unix_time', 'merch_lat', 'merch_long',
     'merch_zipcode', 'zip', 'amt_log', 'hour_of_day', 'day_of_week',
@@ -86,7 +84,6 @@ EXCLUDE_COLUMNS = [
     'trans_num', 'is_fraud'
 ]
 
-import torch
 from prometheus_client import start_http_server, Counter, Gauge, CollectorRegistry, push_to_gateway
 
 # Prometheus Metrics
@@ -119,9 +116,20 @@ class ModelTrainer:
         self.output_path_cpu.mkdir(parents=True, exist_ok=True)
         self.output_path_gpu.mkdir(parents=True, exist_ok=True)
         
-        self.gpu_mode = torch.cuda.is_available() and GPU_AVAILABLE
+        self.gpu_mode = GPU_AVAILABLE
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
+
+        # Preflight GPU check — fall back to CPU if CUDA device is unavailable
+        if self.gpu_mode:
+            try:
+                device_count = cp.cuda.runtime.getDeviceCount()
+                if device_count == 0:
+                    raise RuntimeError("No CUDA devices found")
+                log.info(f"GPU preflight OK: {device_count} device(s) available")
+            except Exception as e:
+                log.warning(f"GPU preflight FAILED ({e}). Falling back to CPU.")
+                self.gpu_mode = False
         
         log.info("=" * 70)
         log.info("Pod 3: Enterprise Model Training")
@@ -191,13 +199,30 @@ class ModelTrainer:
             'device': 'cuda' if self.gpu_mode else 'cpu',
         }
         
-        model = xgb.train(params, dtrain, num_boost_round=100)
+        # Retry loop: transient CUDA context issues can resolve on retry
+        last_exc = None
+        for attempt in range(1, 4):
+            try:
+                model = xgb.train(params, dtrain, num_boost_round=100)
+                break
+            except Exception as e:
+                last_exc = e
+                log.warning(f"Training attempt {attempt}/3 failed: {e}")
+                if attempt < 3:
+                    time.sleep(5 * attempt)  # 5s, 10s backoff
+        else:
+            raise RuntimeError(f"All training attempts failed. Last error: {last_exc}")
+        
         duration = time.time() - start
         
         throughput = len(X_train) / duration
         TRAIN_SAMPS_GAUGE.set(throughput)
         if self.gpu_mode:
-            GPU_MEM_GAUGE.set(torch.cuda.memory_allocated())
+            try:
+                free, total = cp.cuda.runtime.memGetInfo()
+                GPU_MEM_GAUGE.set(total - free)
+            except Exception:
+                pass
             
         return model, duration
 
@@ -228,56 +253,94 @@ class ModelTrainer:
             }
             atomic_write(model_dir / "_status.json", json.dumps(status))
 
+def _run_training(trainer) -> tuple:
+    """Run prepare_data + train, return (model, duration, X_test, y_test, feats)."""
+    X_train, y_train, X_test, y_test, feats = trainer.prepare_data()
+    # Validate we have actual rows
+    n_rows = len(X_train) if hasattr(X_train, '__len__') else X_train.shape[0]
+    if n_rows == 0:
+        raise ValueError("Training dataset is empty — upstream prep may have produced no valid rows")
+    log.info(f"Training on {n_rows} rows (gpu_mode={trainer.gpu_mode})")
+    model, duration = trainer.train(X_train, y_train)
+    return model, duration, X_test, y_test, feats
+
+
 def main():
+    from sklearn.metrics import precision_score, recall_score
+
     start_http_server(8000)
     trainer = ModelTrainer()
-    
+
     if not trainer.wait_for_upstream():
         sys.exit(1)
-        
+
+    # --- Outer retry loop: wraps both prepare_data() and train() ---
+    # Attempt 1-3 on current backend (GPU if available, CPU otherwise).
+    # If all attempts fail, fall back to CPU and try once more.
+    MAX_ATTEMPTS = 3
+    model = duration = X_test = y_test = feats = None
+    last_exc = None
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            model, duration, X_test, y_test, feats = _run_training(trainer)
+            break
+        except Exception as e:
+            last_exc = e
+            log.warning(f"Training attempt {attempt}/{MAX_ATTEMPTS} failed: {e}")
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(5 * attempt)  # 5s, 10s backoff
+    else:
+        # All GPU attempts exhausted — try once on CPU
+        if trainer.gpu_mode:
+            log.warning("All GPU attempts failed. Falling back to CPU for final attempt.")
+            trainer.gpu_mode = False
+            try:
+                model, duration, X_test, y_test, feats = _run_training(trainer)
+            except Exception as e:
+                log.error(f"CPU fallback also failed: {e}")
+                sys.exit(1)
+        else:
+            log.error(f"All training attempts failed: {last_exc}")
+            sys.exit(1)
+
+    # --- Evaluate ---
     try:
-        X_train, y_train, X_test, y_test, feats = trainer.prepare_data()
-        model, duration = trainer.train(X_train, y_train)
-        
-        # Real metrics for the dashboard
-        from sklearn.metrics import precision_score, recall_score
-        
-        # Generate predictions
         dtest = xgb.DMatrix(X_test)
         y_pred = model.predict(dtest)
-        predictions = [round(value) for value in y_pred]
-        
-        # Handle GPU data (cudf/cupy) -> CPU (numpy) for sklearn
+        predictions = [round(v) for v in y_pred]
+
+        # Handle GPU tensors -> numpy for sklearn
         y_test_cpu = y_test
         if hasattr(y_test, "to_numpy"):
             y_test_cpu = y_test.to_numpy()
-        elif hasattr(y_test, "values"): # cudf sometimes
+        elif hasattr(y_test, "values"):
             try:
-                y_test_cpu = y_test.values.get() # cupy to numpy
-            except:
+                y_test_cpu = y_test.values.get()
+            except Exception:
                 pass
 
         metrics = {
             "precision": float(precision_score(y_test_cpu, predictions, zero_division=0)),
             "recall": float(recall_score(y_test_cpu, predictions, zero_division=0)),
-            "samples_per_sec": len(X_train)/duration
+            "samples_per_sec": len(X_test) / duration if duration > 0 else 0,
         }
         PRECISION_GAUGE.set(metrics["precision"])
         RECALL_GAUGE.set(metrics["recall"])
-        
-        trainer.save_model(model, feats, metrics)
-        
-        try:
-            push_to_gateway(trainer.push_gateway, job='model-train', 
-                            grouping_key={'run_id': trainer.run_id}, registry=REGISTRY)
-        except Exception as e:
-            log.warning(f"PushGateway Warning: {e}")
-        
-        log.info(f"COMPLETE: Model trained in {duration:.2f}s")
-        
     except Exception as e:
-        log.error(f"FAILED: {e}")
-        sys.exit(1)
+        log.warning(f"Metrics evaluation failed (non-fatal): {e}")
+        metrics = {"precision": 0.0, "recall": 0.0, "samples_per_sec": 0.0}
+
+    trainer.save_model(model, feats, metrics)
+
+    try:
+        push_to_gateway(trainer.push_gateway, job='model-train',
+                        grouping_key={'run_id': trainer.run_id}, registry=REGISTRY)
+    except Exception as e:
+        log.warning(f"PushGateway Warning (non-fatal): {e}")
+
+    log.info(f"COMPLETE: Model trained in {duration:.2f}s | precision={metrics['precision']:.3f} recall={metrics['recall']:.3f}")
+
 
 if __name__ == "__main__":
     main()

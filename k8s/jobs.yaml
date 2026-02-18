@@ -138,7 +138,7 @@ metadata:
   name: data-prep-gpu
   namespace: fraud-det
 spec:
-  backoffLimit: 0
+  backoffLimit: 3
   activeDeadlineSeconds: 7200
   ttlSecondsAfterFinished: 1800
   template:
@@ -156,6 +156,9 @@ spec:
       nodeSelector:
         nvidia.com/gpu.present: "true"
       initContainers:
+      - name: check-gpu
+        image: nvidia/cuda:12.2.1-base-ubuntu22.04
+        command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
         image: busybox
         command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
@@ -174,6 +177,9 @@ spec:
         value: "gpu"
         effect: "NoSchedule"
       - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "nvidia.com/gpu"
         operator: "Exists"
         effect: "NoSchedule"
       containers:
@@ -215,7 +221,7 @@ metadata:
   name: model-train-gpu
   namespace: fraud-det
 spec:
-  backoffLimit: 0
+  backoffLimit: 3
   activeDeadlineSeconds: 7200
   ttlSecondsAfterFinished: 1800
   template:
@@ -233,6 +239,9 @@ spec:
       nodeSelector:
         nvidia.com/gpu.present: "true"
       initContainers:
+      - name: check-gpu
+        image: nvidia/cuda:12.2.1-base-ubuntu22.04
+        command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: check-storage
         image: busybox
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
@@ -251,6 +260,9 @@ spec:
         value: "gpu"
         effect: "NoSchedule"
       - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "nvidia.com/gpu"
         operator: "Exists"
         effect: "NoSchedule"
       containers:

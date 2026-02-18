@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
-from kubernetes import client, config, utils, watch
+from kubernetes import client, config, utils
 
 # Structured Logging
 logging.basicConfig(
@@ -766,19 +766,21 @@ async def alerts_websocket(websocket: WebSocket):
 
 # ==================== Log Monitoring & Reconciliation ====================
 
+# Track pods already being tailed to avoid duplicate streamers
+_TAILED_PODS: set = set()
+
 async def monitor_logs(run_id: str):
-    """Background task to tail logs and update telemetry"""
+    """Background task to discover pods and start log tailers"""
     logger.info(f"Starting log monitor for run {run_id}")
-    pods_seen = set()
     
     while state.is_running:
         try:
-            # 1. auto-discover pods
             pods = k8s_core.list_namespaced_pod("fraud-det", label_selector=f"run_id={run_id}")
             for pod in pods.items:
-                if pod.metadata.name not in pods_seen and pod.status.phase in ["Running", "Succeeded"]:
-                    pods_seen.add(pod.metadata.name)
-                    asyncio.create_task(tail_pod_logs(pod.metadata.name))
+                name = pod.metadata.name
+                if name not in _TAILED_PODS and pod.status.phase in ["Running", "Succeeded"]:
+                    _TAILED_PODS.add(name)
+                    asyncio.create_task(tail_pod_logs(name))
             
             await asyncio.sleep(5)
         except Exception as e:
@@ -786,57 +788,60 @@ async def monitor_logs(run_id: str):
             await asyncio.sleep(5)
 
 async def tail_pod_logs(pod_name: str):
-    """Stream logs from a specific pod"""
+    """Stream logs from a pod using kubectl logs --follow (non-blocking async subprocess)."""
     logger.info(f"Tailing logs for {pod_name}")
     try:
-        w = watch.Watch()
-        # Stream logs
-        for line in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
-            if not state.is_running: break
+        proc = await asyncio.create_subprocess_exec(
+            "kubectl", "logs", "-n", "fraud-det",
+            "--follow", "--tail=0", pod_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        
+        while state.is_running:
+            line_bytes = await proc.stdout.readline()
+            if not line_bytes:  # EOF — pod finished
+                break
             
-            # Debug: Print raw line to see if we get anything
-            # logger.debug(f"RAW LOG from {pod_name}: {line[:100]}")
-            
-            # Update telemetry
+            line = line_bytes.decode("utf-8", errors="replace").rstrip()
             data = parse_telemetry_line(line)
-            if data:
-                # Update global state
-                with state.lock:
-                    # Map stage names to telemetry keys
-                    # [TELEMETRY] stage=Ingest -> "generated"
-                    # [TELEMETRY] stage=Data Prep -> "data_prep_{cpu/gpu}"
-                    # [TELEMETRY] stage=Inference -> "inference_{cpu/gpu}"
+            if not data:
+                continue
+            
+            with state.lock:
+                stage = data.get("stage", "")
+                
+                if "Ingest" in stage:
+                    state.telemetry["generated"] = data.get("rows", 0)
+                    state.telemetry["throughput"] = data.get("throughput", 0)
                     
-                    stage = data.get("stage", "")
-                    
-                    if "Ingest" in stage:
-                        state.telemetry["generated"] = data.get("rows", 0)
-                        state.telemetry["throughput"] = data.get("throughput", 0) # Generator TPS
+                elif "Data Prep" in stage:
+                    if "gpu" in pod_name:
+                        state.telemetry["data_prep_gpu"] = data.get("rows", 0)
+                    else:
+                        state.telemetry["data_prep_cpu"] = data.get("rows", 0)
                         
-                    elif "Data Prep" in stage:
-                        # Differentiate CPU vs GPU based on pod name or 'backend' field if available
-                        if "gpu" in pod_name:
-                             state.telemetry["data_prep_gpu"] = data.get("rows", 0)
-                        else:
-                             state.telemetry["data_prep_cpu"] = data.get("rows", 0)
-                             
-                    elif "Inference" in stage:
-                        if "gpu" in pod_name:
-                            state.telemetry["inference_gpu"] = data.get("rows", 0)
-                        else:
-                            state.telemetry["inference_cpu"] = data.get("rows", 0)
-                            
-                        # Fraud stats
-                        # Ideally we sum fraud count
-                        # But here we might be overwriting. For a demo, taking the latest "total" is okay 
-                        # if the pods log cumulative totals.
-                        
-                    # Universal stats
-                    if "cpu_cores" in data: state.telemetry["cpu_percent"] = data["cpu_cores"] # Approximation
-                    if "ram_percent" in data: state.telemetry["ram_percent"] = data["ram_percent"]
-                    
+                elif "Inference" in stage:
+                    if "gpu" in pod_name:
+                        state.telemetry["inference_gpu"] = data.get("rows", 0)
+                    else:
+                        state.telemetry["inference_cpu"] = data.get("rows", 0)
+                
+                if "cpu_cores" in data:
+                    state.telemetry["cpu_percent"] = data["cpu_cores"]
+                if "ram_percent" in data:
+                    state.telemetry["ram_percent"] = data["ram_percent"]
+        
+        # Clean up the subprocess
+        try:
+            proc.kill()
+        except Exception:
+            pass
+            
     except Exception as e:
         logger.warning(f"Log tail ended for {pod_name}: {e}")
+    finally:
+        _TAILED_PODS.discard(pod_name)
 
 @app.on_event("startup")
 async def startup_event():

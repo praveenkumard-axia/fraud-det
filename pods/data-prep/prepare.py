@@ -116,6 +116,17 @@ class DataPrepService:
         self.gpu_mode = GPU_AVAILABLE and (os.getenv('FORCE_CPU', 'false').lower() != 'true')
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
+
+        # Preflight GPU check — fall back to CPU if CUDA device is unavailable
+        if self.gpu_mode:
+            try:
+                device_count = cp.cuda.runtime.getDeviceCount()
+                if device_count == 0:
+                    raise RuntimeError("No CUDA devices found")
+                log(f"GPU preflight OK: {device_count} device(s) available")
+            except Exception as e:
+                log(f"GPU preflight FAILED ({e}). Falling back to CPU (Polars).")
+                self.gpu_mode = False
         
         log("=" * 70)
         log("Pod 2: Enterprise Feature Engineering (Continuous)")
@@ -124,10 +135,6 @@ class DataPrepService:
         log(f"Output:   {self.output_dir}")
         log(f"Backend:  {'RAPIDS cuDF (GPU)' if self.gpu_mode else 'Polars (CPU)'}")
         log("=" * 70)
-
-        if self.gpu_mode:
-            # self._init_dask() # Removed: LocalCUDACluster problematic in container, using dask_cudf directly
-            pass
 
     def process_continuous(self):
         """Continuous processing loop."""
@@ -159,10 +166,17 @@ class DataPrepService:
             # 2. Process Batch
             log(f"Processing batch of {len(new_files)} files...")
             start_batch = time.time()
-            if self.gpu_mode:
-                row_count = self._process_gpu(new_files)
-            else:
-                row_count = self._process_cpu_polars(new_files)
+            try:
+                if self.gpu_mode:
+                    row_count = self._process_gpu(new_files)
+                else:
+                    row_count = self._process_cpu_polars(new_files)
+            except Exception as batch_exc:
+                log(f"Batch processing error (skipping batch): {batch_exc}")
+                # Mark files as processed so we don't retry the same corrupt set
+                for f in new_files:
+                    processed_files.add(f.name)
+                continue
             
             duration = time.time() - start_batch
             
@@ -247,25 +261,24 @@ class DataPrepService:
         return pl.read_parquet(output_file, columns=["is_fraud"]).shape[0]
 
     def _process_gpu(self, files: List[Path]) -> int:
-        # Simplified dask_cudf path
         import dask_cudf
-        try:
-            ddf = dask_cudf.read_parquet([str(f) for f in files])
-        except Exception as batch_error:
-            log(f"Batch read failed: {batch_error}. Retrying individually...")
-            valid_files = []
-            for f in files:
-                try:
-                    # quick check
-                    dask_cudf.read_parquet(str(f))
-                    valid_files.append(str(f))
-                except Exception as e:
-                    log(f"Skipping corrupted file {f.name}: {e}")
-            
-            if not valid_files:
-                return 0
-                
-            ddf = dask_cudf.read_parquet(valid_files)
+        # Proactively validate each file before building the batch.
+        # This avoids the "Parquet magic bytes not found" crash on partially-written files.
+        valid_files = []
+        for f in files:
+            try:
+                # Lightweight schema-only read to confirm the file is complete
+                dask_cudf.read_parquet(str(f), columns=[]).head(0)
+                valid_files.append(str(f))
+            except Exception as e:
+                log(f"Skipping corrupted/incomplete file {f.name}: {e}")
+
+        if not valid_files:
+            log("No valid files in batch. Skipping...")
+            return 0
+
+        log(f"Reading {len(valid_files)}/{len(files)} valid files...")
+        ddf = dask_cudf.read_parquet(valid_files)
         
         # Feature Engineering Pipeline (GPU)
         ddf['amt_log'] = ddf['amt'].map_partitions(lambda s: cp.log1p(s))
@@ -291,11 +304,16 @@ class DataPrepService:
         ddf = ddf.drop(columns=cols_to_drop)
         
         timestamp = int(time.time() * 1000)
-        output_file = self.output_dir / f"features_batch_{timestamp}.parquet"
-        
-        ddf.to_parquet(str(output_file) + ".tmp")
-        os.rename(str(output_file) + ".tmp", output_file)
-        return len(ddf)
+        # dask_cudf writes a DIRECTORY of part files, not a single file.
+        # Write directly to the final path — dask handles the commit internally.
+        output_dir = self.output_dir / f"features_batch_{timestamp}.parquet"
+        ddf.to_parquet(str(output_dir), write_metadata_file=True)
+        # Compute row count from partition lengths (avoids re-reading the data)
+        try:
+            row_count = int(ddf.map_partitions(len).compute().sum())
+        except Exception:
+            row_count = 0
+        return row_count
 
 def main():
     signal.signal(signal.SIGINT, signal_handler)
