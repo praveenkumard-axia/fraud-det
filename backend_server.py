@@ -443,14 +443,14 @@ async def run_pipeline_sequence():
         # We no longer rely on file system checks which are environment-dependent
         
         # Step A: Wait for 10,000 records to be GATHERED
-        gather_reached = await wait_for_telemetry_threshold("generated", 5000)
+        gather_reached = await wait_for_telemetry_threshold("generated", 1000)
         
         if not gather_reached:
             logger.warning("Pipeline stop requested or gather timeout. Aborting flow.")
             return
 
         # Step B: Wait for 10,000 records to be PREPROCESSED (GPU)
-        prep_reached = await wait_for_telemetry_threshold("data_prep_gpu", 5000)
+        prep_reached = await wait_for_telemetry_threshold("data_prep_gpu", 1000)
         
         if not prep_reached:
             logger.warning("Pipeline stop requested or prep timeout. Aborting flow.")
