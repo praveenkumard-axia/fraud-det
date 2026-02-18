@@ -9,7 +9,6 @@ COPY requirements.txt .
 # Pin pandas to avoid is_extension_type error in RAPIDS 24.02
 # Install torch with CUDA 11.8 support (compat with 12.0 container)
 RUN pip install "pandas<2.0.0" && \
-    pip install torch --index-url https://download.pytorch.org/whl/cu118 && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY train.py .
