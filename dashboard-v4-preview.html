@@ -1429,6 +1429,37 @@
   <!-- ═══════════════════════════════════════════════════════ -->
   <div id="tab-tech" class="tab-content">
     <div class="dashboard">
+
+      <!-- NEW: Infrastructure Health Row -->
+      <div class="card mb-4" style="margin-bottom: 20px;">
+        <div class="card-header" style="display: flex; justify-content: space-between;">
+          <span class="card-title">Infrastructure Health</span>
+          <span class="badge bg-success" id="infra-status-badge">HEALTHY</span>
+        </div>
+        <div style="display: flex; gap: 15px; text-align: center;">
+          <!-- NFS -->
+          <div style="flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+            <div style="font-size: 10px; color: var(--text-muted);">NFS STATUS</div>
+            <div id="nfs-val" style="font-size: 18px; font-weight: bold;">OK</div>
+          </div>
+          <!-- FC -->
+          <div style="flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+            <div style="font-size: 10px; color: var(--text-muted);">FC PORTS</div>
+            <div style="font-size: 18px; font-weight: bold;"><span id="fc-val">4</span>/4</div>
+          </div>
+          <!-- OOM -->
+          <div style="flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+            <div style="font-size: 10px; color: var(--text-muted);">OOM KILLS (5m)</div>
+            <div id="oom-val" style="font-size: 18px; font-weight: bold;">0</div>
+          </div>
+          <!-- Disk -->
+          <div style="flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+            <div style="font-size: 10px; color: var(--text-muted);">IO WAIT (dm-3)</div>
+            <div id="disk-val" style="font-size: 18px; font-weight: bold;">0ms</div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-12">
 
         <!-- ── LEFT COLUMN ── -->
@@ -2161,6 +2192,48 @@
           const glow = isHigh ? '; box-shadow: 0 0 8px rgba(239,68,68,0.4)' : '';
           return `<div class="velocity-bar" style="height: ${Math.max(2, pct)}%; background: ${bg}${glow};"></div>`;
         }).join('');
+      }
+
+      // 3. Infrastructure Health (New Panel)
+      if (data.health) {
+        const h = data.health;
+
+        // NFS
+        const nfsEl = document.getElementById('nfs-val');
+        if (nfsEl) {
+          if (h.nfs_errors > 0) {
+            nfsEl.textContent = "ERRORS";
+            nfsEl.style.color = "var(--red)";
+          } else {
+            nfsEl.textContent = "OK";
+            nfsEl.style.color = "var(--green)";
+          }
+        }
+
+        // FC Ports
+        if (document.getElementById('fc-val')) document.getElementById('fc-val').textContent = h.fc_links_online;
+
+        // OOM
+        const oomEl = document.getElementById('oom-val');
+        if (oomEl) {
+          oomEl.textContent = h.oom_kills_min;
+          oomEl.style.color = h.oom_kills_min > 0 ? "var(--red)" : "inherit";
+        }
+
+        // Disk Pressure
+        if (document.getElementById('disk-val')) document.getElementById('disk-val').textContent = h.disk_pressure + "s";
+
+        // Overall Badge
+        const badge = document.getElementById('infra-status-badge');
+        if (badge) {
+          if (h.nfs_errors > 0 || h.fc_links_online < 4 || h.oom_kills_min > 0) {
+            badge.textContent = "DEGRADED";
+            badge.className = "badge bg-danger";
+          } else {
+            badge.textContent = "HEALTHY";
+            badge.className = "badge bg-success";
+          }
+        }
       }
 
       // Update velocity badge with spike info

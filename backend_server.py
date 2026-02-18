@@ -429,12 +429,47 @@ async def get_machine_metrics():
     cpu_tp = fb_read + fb_write 
     gpu_tp = fb_read * 2 
     
+    # --- Infrastructure Health ---
+    # NFS Errors (Binary: 0=OK, >0=Error)
+    nfs_err = await get_prometheus_metric('sum(node_filesystem_device_error{device=~".*fraud.*"})') or 0
+    
+    # Fibre Channel Links (Count Online)
+    fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})') or 0
+    # Assuming 4 ports total is the healthy state
+    
+    # OOM Kills (Rate per minute)
+    oom_rate = await get_prometheus_metric('rate(node_vmstat_oom_kill[5m]) * 60') or 0
+    
+    # Disk Write Pressure (proxy for saturation on dm-3/dm-4)
+    disk_pressure = await get_prometheus_metric('rate(node_disk_write_time_seconds_total{device=~"dm-3|dm-4"}[1m])') or 0
+
+    # --- Business Metrics (Triton) ---
+    # Inference Throughput (Req/sec)
+    triton_rps = await get_prometheus_metric('sum(rate(nv_inference_request_success[1m]))') or 0
+    
+    # GPU Logic Redefined: If util is 0 but power is high, use power proxy
+    # Max Power for L40 is ~300W. 
+    gpu_power = await get_prometheus_metric('avg(DCGM_FI_DEV_POWER_USAGE)') or 0
+    if gpu_util == 0 and gpu_power > 50:
+         gpu_util = (gpu_power / 300.0) * 100 # Proxy util based on power
+
+    # Update state telemetry if real metrics available
+    if triton_rps > 0:
+        state.telemetry["inference_gpu"] = int(triton_rps * 60) # Convert to 'per minute' for consistency? Or just update rate.
+
     return {
         "is_running": state.is_running,
         "elapsed_sec": (time.time() - state.start_time) if state.start_time else 0,
         "throughput": {
-            "cpu": int(cpu_tp * 200), # Mock scale for TPS from MB/s
-            "gpu": int(gpu_tp * 500)
+            "cpu": int(cpu_tp * 200), 
+            "gpu": int(gpu_tp * 500),
+            "triton_rps": round(triton_rps, 1)
+        },
+        "health": {
+            "nfs_errors": int(nfs_err),
+            "fc_links_online": int(fc_online),
+            "oom_kills_min": round(oom_rate, 2),
+            "disk_pressure": round(disk_pressure, 2)
         },
         "FlashBlade": {
             "read_mbps": round(fb_read, 1),
