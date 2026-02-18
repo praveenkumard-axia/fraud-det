@@ -29,12 +29,7 @@ spec:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       containers:
       - name: gather
@@ -43,8 +38,8 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           requests:
-            cpu: "2"
-            memory: "8Gi"
+            cpu: "500m"
+            memory: "2Gi"
           limits:
             cpu: "4"
             memory: "16Gi"
@@ -87,27 +82,20 @@ spec:
       initContainers:
       - name: fix-permissions
         image: busybox
-
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/run-default && chmod 777 /fraud-benchmark/runs/run-default || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       containers:
       - name: prep
@@ -116,8 +104,8 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           requests:
-            cpu: "2"
-            memory: "8Gi"
+            cpu: "500m"
+            memory: "2Gi"
           limits:
             cpu: "4"
             memory: "16Gi"
@@ -163,8 +151,6 @@ spec:
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
@@ -177,27 +163,20 @@ spec:
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
         image: busybox
-
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -Rf 777 /fraud-benchmark || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/run-default && chmod 777 /fraud-benchmark/runs/run-default || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       - name: check-storage
         image: busybox
-
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       - key: "nvidia.com/gpu"
         operator: "Exists"
@@ -222,8 +201,8 @@ spec:
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
         resources:
           requests:
-            cpu: "2"
-            memory: "8Gi"
+            cpu: "1"
+            memory: "4Gi"
             nvidia.com/gpu: 1
           limits:
             cpu: "8"
@@ -258,8 +237,6 @@ spec:
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
@@ -287,12 +264,7 @@ spec:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       - key: "nvidia.com/gpu"
         operator: "Exists"
@@ -371,12 +343,7 @@ spec:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       containers:
       - name: infer
@@ -444,12 +411,7 @@ spec:
         - name: storage
           mountPath: /fraud-benchmark
       tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "gpu"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
+      - operator: "Exists"
         effect: "NoSchedule"
       containers:
       - name: infer
