@@ -168,7 +168,11 @@ spec:
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
-
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+          requests:
+            nvidia.com/gpu: 1
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
@@ -259,7 +263,11 @@ spec:
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
-
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+          requests:
+            nvidia.com/gpu: 1
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: check-storage
