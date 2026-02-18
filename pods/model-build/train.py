@@ -158,7 +158,10 @@ class ModelTrainer:
             raise FileNotFoundError(f"No feature files in {self.input_dir}")
             
         # Fast load 1M samples
-        df = pl.scan_parquet(str(self.input_dir / "*.parquet")).head(1000000).collect()
+        # Fix: Pass explicit file list instead of glob string to avoid "expanded paths were empty" error
+        # despite files existing (which we verified with `glob` above).
+        file_paths = [str(f) for f in files]
+        df = pl.scan_parquet(file_paths).head(1000000).collect()
         
         if self.gpu_mode:
             import cudf

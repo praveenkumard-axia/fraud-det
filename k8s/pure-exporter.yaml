@@ -34,7 +34,7 @@ spec:
           name: metrics
         env:
         - name: PURE_APITOKEN
-          value: "replace-with-your-api-token" # <--- USER MUST UPDATE THIS
+          value: "T-2552dee1-4b9b-4b17-b55f-6c34e3fe5e88" # <--- USER MUST UPDATE THIS
         - name: PURE_FLASHBLADE_ENDPOINT
           value: "10.23.181.65" # From storage.yaml
         resources:
