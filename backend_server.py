@@ -103,6 +103,11 @@ class PipelineState:
             "ram_percent": 0,
             "fraud_blocked": 0,
             "txns_scored": 0,
+            # Per-component resource metrics
+            "data_prep_cpu_stats": {"cpu": 0, "ram": 0},
+            "data_prep_gpu_stats": {"cpu": 0, "ram": 0},
+            "inference_cpu_stats": {"cpu": 0, "ram": 0},
+            "inference_gpu_stats": {"cpu": 0, "ram": 0},
         }
         
         # Configuration
@@ -139,6 +144,10 @@ class PipelineState:
                 "ram_percent": 0,
                 "fraud_blocked": 0,
                 "txns_scored": 0,
+                "data_prep_cpu_stats": {"cpu": 0, "ram": 0},
+                "data_prep_gpu_stats": {"cpu": 0, "ram": 0},
+                "inference_cpu_stats": {"cpu": 0, "ram": 0},
+                "inference_gpu_stats": {"cpu": 0, "ram": 0},
             }
             self.start_time = None
             self.generate_run_id()
@@ -329,10 +338,20 @@ async def monitor_job_logs(job_name: str, run_id: str):
                                     logger.info(f"Updated telemetry {tele_key} = {data['rows']}")
                                 if "throughput" in data:
                                     state.telemetry["throughput"] = data["throughput"]
+                                
+                                # Update global dashboard aggregates (Legacy support)
                                 if "cpu_cores" in data:
                                     state.telemetry["cpu_percent"] = data["cpu_cores"]
                                 if "ram_percent" in data:
                                     state.telemetry["ram_percent"] = data["ram_percent"]
+                                    
+                                # Per-component detailed stats
+                                stats_key = f"{tele_key}_stats"
+                                if stats_key in state.telemetry:
+                                    if "cpu_cores" in data:
+                                        state.telemetry[stats_key]["cpu"] = data["cpu_cores"]
+                                    if "ram_percent" in data:
+                                        state.telemetry[stats_key]["ram"] = data["ram_percent"]
                 w.stop()
             except Exception as stream_exc:
                 logger.error(f"Log stream interrupted for {pod_name}: {stream_exc}")
@@ -615,7 +634,9 @@ async def get_business_metrics():
         "fraud_rate": (fraud_blocked / max(1, txns_scored)),
         "alerts_per_million": round(fpm, 2),
         "high_risk_txn_rate": (fraud_blocked / max(1, txns_scored)),
-        "projected_annual_savings": int(fraud_blocked * 50 * 12) # Mock projection
+        "projected_annual_savings": int(fraud_blocked * 50 * 12),
+        "data_prep_cpu": state.telemetry.get("data_prep_cpu", 0),
+        "data_prep_gpu": state.telemetry.get("data_prep_gpu", 0),
     }
 
 def get_from_db() -> Optional[Dict]:
