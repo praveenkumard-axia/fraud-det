@@ -532,6 +532,57 @@ async def get_run_history():
         {"run_id": "run-20260217-110000", "status": "completed", "duration": "435s", "txns": 1000000}
     ]
 
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Deep System Health & Pipeline Diagnosis (Ported from info.py)"""
+    alerts = []
+    
+    # 1. Infrastructure Checks (Prometheus)
+    # NFS
+    nfs_err_count = await get_prometheus_metric('sum(node_filesystem_device_error{device=~".*fraud.*"})') or 0
+    if nfs_err_count > 0:
+        alerts.append({"level": "critical", "msg": f"NFS Mount Errors Detected ({int(nfs_err_count)} vols). Check FlashBlade exports."})
+        
+    # FC Ports
+    fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})') or 0
+    if fc_online < 4:
+         alerts.append({"level": "warning", "msg": f"FC Link Degraded: {int(fc_online)}/4 ports online. Bandwidth halved."})
+         
+    # OOM
+    oom_total = await get_prometheus_metric('node_vmstat_oom_kill') or 0
+    if oom_total > 0:
+        alerts.append({"level": "warning", "msg": f"High Memory Pressure: {int(oom_total)} OOM kills detected."})
+        
+    # GPU Utilization vs Power (Zombie/Idle check)
+    gpu_util = await get_prometheus_metric('avg(nv_gpu_utilization)') or 0
+    gpu_power = await get_prometheus_metric('avg(nv_gpu_power_usage)') or 0
+    if gpu_util == 0 and gpu_power > 50:
+        alerts.append({"level": "info", "msg": "GPU Idle but drawing power. Model loaded but not receiving requests?"})
+
+    # 2. Pipeline Logic Diagnosis (Internal State)
+    # Check if jobs launched too close together (Dependency failure symptom)
+    pipeline_health = {"issue_detected": False, "diagnosis": "Healthy"}
+    
+    # We need to track actual start times of stages. 
+    # For now, we infer from the log monitor or just generic alert if NFS is down.
+    if nfs_err_count > 0:
+        pipeline_health = {
+            "issue_detected": True,
+            "diagnosis": "Pipeline Stalled: Compute nodes cannot access Storage (NFS).",
+            "recommendation": "Fix NFS mounts on K8s nodes immediately."
+        }
+
+    return {
+        "alerts": alerts,
+        "pipeline_health": pipeline_health,
+        "infrastructure": {
+            "nfs_errors": int(nfs_err_count),
+            "fc_online": int(fc_online),
+            "oom_total": int(oom_total),
+            "gpu_power": round(gpu_power, 1)
+        }
+    }
+
 @app.post("/api/run/start")
 @app.post("/api/control/start") 
 async def start_pipeline_control():

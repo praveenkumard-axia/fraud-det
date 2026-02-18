@@ -2266,15 +2266,72 @@
     function startBusinessPoll() {
       if (businessPollTimer) clearInterval(businessPollTimer);
       // Only perform metrics fetch and start the interval if polling is allowed.
-      // This prevents initial page load or tab switches from triggering API calls
-      // before the user explicitly starts the pipeline.
       if (isPollingAllowed) {
         fetchBusinessMetrics();
         businessPollTimer = setInterval(fetchBusinessMetrics, 1000);
+
+        // Also start Diagnostics
+        startDiagnosticsPoll();
       }
     }
     function stopBusinessPoll() {
       if (businessPollTimer) { clearInterval(businessPollTimer); businessPollTimer = null; }
+    }
+
+    // --- DIAGNOSTICS POLLING ---
+    let diagnosticsTimer = null;
+
+    async function fetchDiagnostics() {
+      try {
+        const res = await API.get('/diagnostics');
+        const d = await res.json();
+
+        // 1. Alerts Notification (Inject into Top Banner if Critical)
+        if (d.alerts && d.alerts.length > 0) {
+          const crit = d.alerts.filter(a => a.level === 'critical');
+          const warn = d.alerts.filter(a => a.level === 'warning');
+
+          const banner = document.getElementById('top-banner-msg');
+          if (banner) {
+            if (crit.length > 0) {
+              banner.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i> CRITICAL: ${crit[0].msg}`;
+              banner.parentElement.style.background = 'var(--red)';
+            } else if (warn.length > 0) {
+              // Only show warning if no critical
+              banner.innerHTML = `<i class="bi bi-exclamation-circle"></i> WARNING: ${warn[0].msg}`;
+              banner.parentElement.style.background = 'var(--amber)';
+              banner.parentElement.style.color = '#000';
+            }
+          }
+        } else {
+          // Reset banner if healthy
+          const banner = document.getElementById('top-banner-msg');
+          if (banner && banner.innerText.includes('CRITICAL')) {
+            banner.innerText = "System Health: OK";
+            banner.parentElement.style.background = 'rgba(16, 185, 129, 0.2)';
+          }
+        }
+
+        // 2. Pipeline Diagnosis Badge
+        const diagBadge = document.getElementById('pipeline-diag-badge');
+        if (diagBadge) {
+          if (d.pipeline_health && d.pipeline_health.issue_detected) {
+            diagBadge.innerHTML = `<span class="badge bg-danger">PIPELINE STALLED</span>`;
+            diagBadge.title = d.pipeline_health.diagnosis;
+          } else {
+            diagBadge.innerHTML = "";
+          }
+        }
+
+      } catch (e) {
+        console.error("Diagnostics Poll Failed", e);
+      }
+    }
+
+    function startDiagnosticsPoll() {
+      if (diagnosticsTimer) clearInterval(diagnosticsTimer);
+      fetchDiagnostics(); // Initial
+      diagnosticsTimer = setInterval(fetchDiagnostics, 5000); // Poll every 5s
     }
 
     let machinePollTimer = null;
