@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
-from kubernetes import client, config, utils
+from kubernetes import client, config, utils, watch
 
 # Structured Logging
 logging.basicConfig(
