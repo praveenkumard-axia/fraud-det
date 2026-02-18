@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import numpy as np
 from prometheus_client import start_http_server, Counter, Gauge, CollectorRegistry, push_to_gateway
+import signal
 
 STOP_FLAG = False
 
@@ -18,7 +19,6 @@ def signal_handler(signum, frame):
     print("Shutdown signal received")
     STOP_FLAG = True
 
-import signal
 signal.signal(signal.SIGINT, signal_handler)
 
 def log_telemetry(rows, tps, elapsed, cpu_cores, ram_gb, ram_percent, status="Running"):
@@ -40,17 +40,6 @@ P95_GAUGE = Gauge("p95_latency_ms", "95th percentile latency", registry=REGISTRY
 P99_GAUGE = Gauge("p99_latency_ms", "99th percentile latency", registry=REGISTRY)
 FRAUD_COUNTER = Counter("fraud_detected_total", "Total fraud detected", registry=REGISTRY)
 
-def atomic_write(path: Path, content: str = ""):
-    """Enterprise-grade atomic write: tempfile -> fsync -> replace"""
-    dir_path = path.parent
-    dir_path.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=str(dir_path), delete=False) as tmp:
-        tmp.write(content)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        temp_name = tmp.name
-    os.replace(temp_name, str(path))
-
 class InferenceClient:
     def __init__(self):
         self.run_id = os.getenv('RUN_ID', 'run-default')
@@ -63,8 +52,12 @@ class InferenceClient:
         # In benchmark, we use the models path as source of truth for metadata
         self.model_dir = Path(os.getenv('MODEL_DIR', f"{self.run_root}/{exec_type}/models/fraud_xgboost"))
         self.data_dir = Path(os.getenv('DATA_DIR', f"{self.run_root}/{exec_type}/data/features"))
+        self.tmp_dir = Path(os.getenv('TMP_DIR', f"{self.run_root}/tmp"))
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
+        
         if self.gpu_mode:
             try:
                 import cupy as cp
@@ -75,7 +68,25 @@ class InferenceClient:
                 self.log(f"GPU check failed for Inference: {e}. Falling back to CPU (Polars).")
                 self.gpu_mode = False
         
+        # Load model immediately to fail fast
+        self.bst = xgb.Booster()
+        try:
+             self.bst.load_model(str(self.model_dir / "1" / "xgboost.json"))
+        except Exception as e:
+             self.log(f"Warning: Model not found at init, will wait: {e}")
+
         log_telemetry(0, 0, 0, psutil.cpu_count(), 0, 0, status="Initializing")
+
+    def atomic_write(self, path: Path, content: str = ""):
+        """Enterprise-grade atomic write: tempfile -> fsync -> replace"""
+        dir_path = path.parent
+        dir_path.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=str(dir_path), delete=False) as tmp:
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            temp_name = tmp.name
+        os.replace(temp_name, str(path))
 
     def wait_for_model(self) -> bool:
         """Wait for the model and its metadata status file."""
@@ -88,106 +99,126 @@ class InferenceClient:
                 return False
             if (self.run_root / "STOP").exists(): return False
             time.sleep(10)
+        
+        # Reload model to be sure
+        try:
+            self.bst.load_model(str(self.model_dir / "1" / "xgboost.json"))
+        except:
+            return False
+            
         return True
 
     def log(self, msg):
         print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
     def run_continuous(self):
-        """Continuous inference loop with checkpointing."""
-        checkpoint_path = self.model_dir / ".processed_features.json"
+        """Entry point for continuous inference loop."""
+        self.wait_for_data()
+
+    def wait_for_data(self):
+        """Monitor data directory for new parquet files/directories"""
+        print(f"Monitoring {self.data_dir} for new data... (GPU={self.gpu_mode})", flush=True)
+        
         processed_files = set()
-        total_rows = 0
+        checkpoint_path = self.tmp_dir / "inference_checkpoint.json"
         
         if checkpoint_path.exists():
             try:
                 with open(checkpoint_path, 'r') as f:
                     processed_files = set(json.load(f))
-                self.log(f"Resuming from checkpoint: {len(processed_files)} files already processed.")
-            except Exception as e:
-                self.log(f"Failed to load checkpoint: {e}")
+                print(f"Resuming from checkpoint: {len(processed_files)} files processed", flush=True)
+            except:
+                print("Corrupted checkpoint, starting fresh", flush=True)
 
-        # Load model
-        model = xgb.Booster()
-        model.load_model(str(self.model_dir / "1" / "xgboost.json"))
-        
+        batch_fraud_total = 0 # Track cumulative locally for reporting
         latencies = []
-        start_bench = time.time()
-        total_txns = 0
-        fraud_count = 0
-        
+
         while not STOP_FLAG:
-            # Check for STOP signal on disk
             if (self.run_root / "STOP").exists():
-                self.log("STOP signal detected on disk. Exiting...")
+                print("STOP signal received", flush=True)
                 break
                 
+            # PRO FIX 1: Handle Directory-Style Parquet (e.g. features_batch_X.parquet/)
+            # Glob returns both files and directories.
             try:
-                all_files = sorted(self.data_dir.glob("*.parquet"))
-                new_files = [f for f in all_files if f.name not in processed_files]
+                all_paths = sorted(self.data_dir.glob("*_batch_*.parquet*")) 
+                new_paths = [p for p in all_paths if p.name not in processed_files]
                 
-                if not new_files:
+                if not new_paths:
                     time.sleep(1)
                     continue
                 
-                # BATCH LIMIT: Avoid getting stuck in a 48k-file loop
-                batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '100'))
-                if len(new_files) > batch_limit:
-                    self.log(f"Found {len(new_files)} new files. Scanning first {batch_limit} for this loop.")
-                    new_files = new_files[:batch_limit]
-                
-                for target_file in new_files:
-                    if STOP_FLAG: break
-                    if (self.run_root / "STOP").exists(): break
-                    
-                    if total_txns % 1000 == 0:
-                        self.log(f"Inference Progress: {total_txns} transactions processed...")
+                for target_path in new_paths:
+                    if STOP_FLAG or (self.run_root / "STOP").exists(): break
+
                     try:
                         start_time = time.time()
                         
+                        # PRO FIX 1 cont: Handle directory vs file
+                        read_path = str(target_path)
+                        
+                        # Load features
+                        # Use read_parquet which handles both single file and directory datasets if engine supports it
+                        # For extremely large directory datasets, scan_parquet is better, but here we process batch by batch
+                        try:
+                            df = pl.read_parquet(read_path)
+                        except Exception as e:
+                            self.log(f"Failed to read parquet {read_path}: {e}")
+                            processed_files.add(target_path.name) # Skip bad file
+                            continue
+                        
+                        if len(df) == 0:
+                            processed_files.add(target_path.name)
+                            continue
+
+                        # Prepare for Inference
+                        cols_to_drop = ['transaction_id', 'is_fraud', 'trans_date_trans_time', 'cc_num'] 
+                        X = df.drop([c for c in cols_to_drop if c in df.columns])
+                        
+                        # PRO FIX 4: Memory Explosion
+                        dmatrix = None
                         if self.gpu_mode:
-                            import cudf
-                            df = cudf.read_parquet(str(target_file))
-                            X = df.drop(columns=["is_fraud"])
-                            if 'category' in X.columns: X = X.drop(columns=['category'])
-                            dmatrix = xgb.DMatrix(X)
+                           # Best effort zero-copy if possible, or direct arrow import
+                           dmatrix = xgb.DMatrix(X.to_arrow()) 
                         else:
-                            df = pl.read_parquet(target_file)
-                            X = df.drop(["is_fraud"])
-                            if 'category' in X.columns: X = X.drop(['category']) 
-                            dmatrix = xgb.DMatrix(X.to_pandas())
+                           # CPU: Polars -> Arrow -> DMatrix is efficient
+                           dmatrix = xgb.DMatrix(X.to_arrow())
+
+                        # Inference
+                        preds = self.bst.predict(dmatrix)
                         
-                        row_count = df.shape[0]
-                        preds = model.predict(dmatrix)
+                        # Metrics
+                        fraud_indices = (preds > 0.85).astype(int)
+                        fraud_count = int(fraud_indices.sum())
                         
-                        # Statistics
-                        txn_latency = (time.time() - start_time) * 1000
-                        latencies.append(txn_latency)
-                        total_txns += row_count
+                        row_count = len(df)
+                        duration = time.time() - start_time
+                        tps = row_count / duration if duration > 0 else 0
                         
-                        fraud_indices = preds > 0.5
-                        fraud_count += int(fraud_indices.sum())
-                        
-                        duration = time.time() - start_bench
-                        avg_tps = total_txns / duration if duration > 0 else 0
-                        
-                        total_rows += row_count
-                        processed_files.add(target_file.name)
-                        
-                        # Update checkpoint
-                        with open(checkpoint_path, 'w') as f:
-                            json.dump(list(processed_files), f)
-                        
-                        # Calculate Percentiles
+                        # PRO FIX 2: Correct Counter Increment
+                        FRAUD_COUNTER.inc(fraud_count)
+                        batch_fraud_total += fraud_count
+
+                        # Track Latency
+                        latencies.append(duration * 1000)
+                        if len(latencies) > 10000: latencies = latencies[-10000:]
                         p95 = np.percentile(latencies, 95) if latencies else 0
                         p99 = np.percentile(latencies, 99) if latencies else 0
-                        
-                        # Push Metrics
-                        TPS_GAUGE.set(avg_tps)
+
+                        # Telemetry
+                        TPS_GAUGE.set(tps)
                         P95_GAUGE.set(p95)
                         P99_GAUGE.set(p99)
-                        FRAUD_COUNTER.inc(fraud_count)
-                        
+
+                        print(f"[TELEMETRY] stage=Inference | status=Running | rows={row_count} | "
+                              f"fraud_blocked={batch_fraud_total} | throughput={int(tps)} | "
+                              f"elapsed={duration:.3f}", flush=True)
+                              
+                        # PRO FIX 3: Atomic Checkpoint
+                        processed_files.add(target_path.name)
+                        self.atomic_write(checkpoint_path, json.dumps(list(processed_files)))
+
+                        # Push Metrics to Gateway
                         try:
                             push_to_gateway(self.push_gateway, job='inference', 
                                             grouping_key={'run_id': self.run_id}, registry=REGISTRY)
@@ -199,22 +230,23 @@ class InferenceClient:
                             "state": "running",
                             "run_id": self.run_id,
                             "metrics": {
-                                "tps": avg_tps,
+                                "tps": tps,
                                 "p95_latency_ms": p95,
                                 "p99_latency_ms": p99,
                                 "fraud_detected": fraud_count
                             },
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
-                        atomic_write(self.model_dir / "../inference_status.json", json.dumps(status_msg))
-                        log_telemetry(total_rows, avg_tps, duration, 0, 0, 0)
-                        
+                        self.atomic_write(self.model_dir / "../inference_status.json", json.dumps(status_msg))
+                        log_telemetry(row_count, tps, duration, psutil.cpu_count(), psutil.virtual_memory().used/(1024**3), psutil.virtual_memory().percent)
+
                     except Exception as e:
-                        self.log(f"Error processing file {target_file}: {e}")
-                        processed_files.add(target_file.name) # Skip bad file
-            
+                        print(f"Inference failed for {target_path.name}: {e}", flush=True)
+                        # Don't mark as processed, will retry
+                        time.sleep(1)
+
             except Exception as e:
-                self.log(f"Error in inference loop: {e}")
+                self.log(f"Error in main inference loop: {e}")
                 time.sleep(1)
 
 def main():
