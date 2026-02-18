@@ -16,6 +16,6 @@ COPY train.py .
 ENV INPUT_DIR=/gpu/data/features
 ENV OUTPUT_DIR_CPU=/cpu/models
 ENV OUTPUT_DIR_GPU=/gpu/models
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=0
 
 CMD ["python", "train.py"]

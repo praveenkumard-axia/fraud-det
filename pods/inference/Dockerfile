@@ -15,6 +15,6 @@ COPY client.py .
 ENV MODEL_DIR=/cpu/models/fraud_xgboost
 ENV DATA_DIR=/cpu/data/features
 ENV EXECUTION_TYPE=CPU
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=0
 
 CMD ["python", "client.py"]

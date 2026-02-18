@@ -16,6 +16,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -39,10 +40,12 @@ spec:
         resources:
           requests:
             cpu: "500m"
-            memory: "2Gi"
+            memory: "16Gi"
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "4"
             memory: "16Gi"
+            ephemeral-storage: "2Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -50,13 +53,26 @@ spec:
           value: "cpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -76,6 +92,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -100,15 +117,16 @@ spec:
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
-
         imagePullPolicy: IfNotPresent
         resources:
           requests:
             cpu: "2"
-            memory: "8Gi"
+            memory: "16Gi"
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "4"
             memory: "16Gi"
+            ephemeral-storage: "2Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -122,13 +140,26 @@ spec:
           value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/raw"
         - name: OUTPUT_DIR
           value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/features"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -148,6 +179,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -184,7 +216,6 @@ spec:
       containers:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
-
         imagePullPolicy: IfNotPresent
         env:
         - name: RUN_ID
@@ -203,22 +234,35 @@ spec:
           value: "/fraud-benchmark/logs/rmm.log"
         - name: TMPDIR
           value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         resources:
           requests:
             cpu: "1"
-            memory: "4Gi"
+            memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "8"
             memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "2Gi"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -238,6 +282,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -291,22 +336,37 @@ spec:
           value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/models"
         - name: OUTPUT_DIR_GPU
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/models"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         resources:
           requests:
             cpu: "2"
-            memory: "4Gi"
+            memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "8"
             memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "2Gi"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -326,6 +386,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -357,10 +418,12 @@ spec:
         resources:
           requests:
             cpu: "1"
-            memory: "2Gi"
+            memory: "8Gi"
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "4"
             memory: "8Gi"
+            ephemeral-storage: "2Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -368,13 +431,26 @@ spec:
           value: "cpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -394,6 +470,7 @@ spec:
         run_id: "run-default"
         app: fraud-benchmark
     spec:
+      priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
         fsGroup: 1000
@@ -429,19 +506,34 @@ spec:
           value: "gpu"
         - name: PUSHGATEWAY_URL
           value: "10.23.181.153:9091"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
+        - name: PYTHONUNBUFFERED
+          value: "0"
         resources:
           requests:
             cpu: "2"
-            memory: "4Gi"
+            memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "500Mi"
           limits:
             cpu: "8"
             memory: "16Gi"
             nvidia.com/gpu: 1
+            ephemeral-storage: "2Gi"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+        - name: storage
+          mountPath: /tmp
+          subPath: tmp
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: storage
         persistentVolumeClaim:
           claimName: fraud-benchmark-pvc
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
