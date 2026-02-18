@@ -18,8 +18,6 @@ from typing import Dict, Optional, List, Tuple
 import yaml
 import tempfile
 import json
-import telemetry_parser
-import concurrent.futures
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -195,18 +193,13 @@ k8s_batch = client.BatchV1Api()
 k8s_core = client.CoreV1Api()
 
 async def run_k8s_job(job_name: str, run_id: str):
-    """Native Kubernetes Job Creation with RUN_ID Injection (Non-blocking)"""
+    """Native Kubernetes Job Creation with RUN_ID Injection"""
     logger.info(f"K8s Native: Launching Job {job_name} (Run: {run_id})")
-    loop = asyncio.get_running_loop()
     
     try:
         # 1. Delete existing job to allow re-run
         try:
-            await loop.run_in_executor(None, lambda: k8s_batch.delete_namespaced_job(
-                name=job_name, 
-                namespace="fraud-det", 
-                propagation_policy='Foreground'
-            ))
+            k8s_batch.delete_namespaced_job(name=job_name, namespace="fraud-det", propagation_policy='Foreground')
             logger.info(f"Cleaned up old job {job_name}")
             await asyncio.sleep(2)
         except client.exceptions.ApiException as e:
@@ -217,10 +210,8 @@ async def run_k8s_job(job_name: str, run_id: str):
         with open(manifest_path, 'r') as f:
             full_manifest = f.read()
         
-        # Inject Run ID and Dynamic Configs
-        push_url = os.getenv("PUSHGATEWAY_URL", "pushgateway.monitoring.svc.cluster.local:9091")
+        # Inject Run ID into labels, env, and initContainer paths
         templated = full_manifest.replace('run-default', run_id)
-        
         docs = list(yaml.safe_load_all(templated))
         
         # Extract the specific job doc
@@ -234,18 +225,15 @@ async def run_k8s_job(job_name: str, run_id: str):
             if 'env' not in container:
                 container['env'] = []
             
-            # Inject RUN_ID & PUSHGATEWAY_URL
-            env_map = {e['name']: e for e in container['env']}
-            
-            if 'RUN_ID' not in env_map:
+            # Inject RUN_ID
+            run_id_found = False
+            for env_var in container['env']:
+                if env_var['name'] == 'RUN_ID':
+                    env_var['value'] = run_id
+                    run_id_found = True
+                    break
+            if not run_id_found:
                 container['env'].append({'name': 'RUN_ID', 'value': run_id})
-            else:
-                env_map['RUN_ID']['value'] = run_id
-                
-            if 'PUSHGATEWAY_URL' not in env_map:
-                container['env'].append({'name': 'PUSHGATEWAY_URL', 'value': push_url})
-            else:
-                env_map['PUSHGATEWAY_URL']['value'] = push_url
 
             # Apply Resource Overrides (Scaling)
             if job_name in state.resource_overrides:
@@ -264,8 +252,8 @@ async def run_k8s_job(job_name: str, run_id: str):
                      # Remove GPU limit if scaled to 0
                      container['resources']['limits'].pop('nvidia.com/gpu', None)
 
-        # 4. Create Job (Async)
-        await loop.run_in_executor(None, lambda: k8s_batch.create_namespaced_job(namespace="fraud-det", body=job_doc))
+        # 4. Create Job
+        k8s_batch.create_namespaced_job(namespace="fraud-det", body=job_doc)
         logger.info(f"Native Job {job_name} created successfully with RUN_ID={run_id}")
         
         # 5. Wait for Completion (Pipeline Integrity)
@@ -273,14 +261,17 @@ async def run_k8s_job(job_name: str, run_id: str):
         while True:
             await asyncio.sleep(3) # Poll interval
             try:
-                status = await loop.run_in_executor(None, lambda: k8s_batch.read_namespaced_job_status(job_name, "fraud-det"))
+                status = k8s_batch.read_namespaced_job_status(job_name, "fraud-det")
                 if status.status.succeeded:
                     logger.info(f"Job {job_name} succeeded.")
                     break
                 if status.status.failed:
                     logger.error(f"Job {job_name} failed.")
+                    # In a real pipeline, we might want to throw here, but for now we log and proceed
+                    # to allow partial pipeline data inspection
                     break
             except client.exceptions.ApiException as e:
+                # Job might disappear or network issue
                 logger.warning(f"Error polling job {job_name}: {e}")
                 
     except Exception as e:
@@ -336,13 +327,8 @@ async def run_pipeline_sequence():
 
 # ==================== Metric Sources (Prometheus) ====================
 
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://prometheus-service:9090")
-FB_EXPORTER_URL = os.getenv("FB_EXPORTER_URL", "http://pure-exporter:9300")
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting Telemetry Parser in background thread...")
-    threading.Thread(target=telemetry_parser.monitor, args=(PROMETHEUS_URL + "/metrics",), daemon=True).start()
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://10.23.181.153:9090")
+FB_EXPORTER_URL = os.getenv("FB_EXPORTER_URL", "http://10.23.181.153:9300")
 
 async def get_prometheus_metric(query: str) -> float:
     """Fetch a single scalar value from Prometheus"""
