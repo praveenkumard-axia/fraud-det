@@ -17,7 +17,7 @@ spec:
     - intr
     - noatime
     - nconnect=8
-  persistentVolumeReclaimPolicy: Retain
+  persistentVolumeReclaimPolicy: Delete
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

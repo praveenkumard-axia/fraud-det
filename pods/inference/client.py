@@ -117,6 +117,12 @@ class InferenceClient:
                     time.sleep(1)
                     continue
                 
+                # BATCH LIMIT: Avoid getting stuck in a 48k-file loop
+                batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '100'))
+                if len(new_files) > batch_limit:
+                    self.log(f"Found {len(new_files)} new files. Scanning first {batch_limit} for this loop.")
+                    new_files = new_files[:batch_limit]
+                
                 for target_file in new_files:
                     if STOP_FLAG: break
                     if (self.run_root / "STOP").exists(): break

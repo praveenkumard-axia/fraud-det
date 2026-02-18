@@ -179,7 +179,7 @@ spec:
         image: busybox
 
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -Rf 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark

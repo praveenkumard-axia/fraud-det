@@ -168,15 +168,19 @@ class DataPrepService:
                         break # Exit the while loop to write _prep_complete
                     time.sleep(1)
                     continue
+
+                # BATCH LIMIT: Avoid processing 48k files at once!
+                # We cap at 500 files to ensure smooth streaming and prevent OOM.
+                batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '500'))
+                if len(new_files) > batch_limit:
+                    log(f"Found {len(new_files)} new files. Capping current batch to {batch_limit} for stability.")
+                    new_files = new_files[:batch_limit]
+                    
             except Exception as e:
                 log(f"Error scanning files: {e}")
                 time.sleep(1)
                 continue
             
-            if not new_files:
-                time.sleep(2)
-                continue
-                
             # 2. Process Batch
             log(f"Processing batch of {len(new_files)} files...")
             start_batch = time.time()
