@@ -8,7 +8,7 @@ spec:
   accessModes:
     - ReadWriteMany
   nfs:
-    server: 10.23.181.65
+    server: nfs-server.storage.svc.cluster.local
     path: /financial-fraud-detection-demo
   mountOptions:
     - vers=3

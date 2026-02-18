@@ -40,7 +40,7 @@ spec:
       - name: gather
         image: pduraiswamy16722/fraud-data-gather:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         resources:
           requests:
             cpu: "1"
@@ -54,7 +54,7 @@ spec:
         - name: EXECUTION_TYPE
           value: "cpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -88,7 +88,7 @@ spec:
       - name: fix-permissions
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
@@ -96,7 +96,7 @@ spec:
       - name: check-storage
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -113,7 +113,7 @@ spec:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         resources:
           requests:
             cpu: "1"
@@ -129,7 +129,7 @@ spec:
         - name: EXECUTION_TYPE
           value: "cpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         - name: INPUT_DIR
           value: "/fraud-benchmark/runs/$(RUN_ID)/cpu/data/raw"
         - name: OUTPUT_DIR
@@ -169,12 +169,12 @@ spec:
       - name: check-gpu
         image: nvidia/cuda:12.2.1-base-ubuntu22.04
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: fix-permissions
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "mkdir -p /fraud-benchmark && chmod -R 777 /fraud-benchmark || true"]
         volumeMounts:
         - name: storage
@@ -182,7 +182,7 @@ spec:
       - name: check-storage
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -202,7 +202,7 @@ spec:
       - name: prep
         image: pduraiswamy16722/fraud-data-prep:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: RUN_ID
           value: "run-default"
@@ -211,7 +211,7 @@ spec:
         - name: EXECUTION_TYPE
           value: "gpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         - name: INPUT_DIR
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/raw"
         - name: OUTPUT_DIR
@@ -260,12 +260,12 @@ spec:
       - name: check-gpu
         image: nvidia/cuda:12.2.1-base-ubuntu22.04
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
       - name: check-storage
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -273,7 +273,7 @@ spec:
       - name: wait-for-prep
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/data/features/_prep_complete ]; do echo waiting for prep; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -293,14 +293,14 @@ spec:
       - name: train
         image: pduraiswamy16722/fraud-model-build:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: RUN_ID
           value: "run-default"
         - name: EXECUTION_TYPE
           value: "gpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         - name: INPUT_DIR
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
         - name: OUTPUT_DIR_CPU
@@ -349,7 +349,7 @@ spec:
       - name: check-storage
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -357,7 +357,7 @@ spec:
       - name: wait-for-model
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -374,7 +374,7 @@ spec:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         resources:
           requests:
             cpu: "1"
@@ -388,7 +388,7 @@ spec:
         - name: EXECUTION_TYPE
           value: "cpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -422,7 +422,7 @@ spec:
       - name: check-storage
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "ls -la /fraud-benchmark"]
         volumeMounts:
         - name: storage
@@ -430,7 +430,7 @@ spec:
       - name: wait-for-model
         image: busybox
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
         volumeMounts:
         - name: storage
@@ -447,14 +447,14 @@ spec:
       - name: infer
         image: pduraiswamy16722/fraud-inference:latest
 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: RUN_ID
           value: "run-default"
         - name: EXECUTION_TYPE
           value: "gpu"
         - name: PUSHGATEWAY_URL
-          value: "10.23.181.153:9091"
+          value: "pushgateway.monitoring.svc.cluster.local:9091"
         resources:
           requests:
             cpu: "2"
