@@ -164,7 +164,7 @@ class DataPrepService:
                 new_files = [f for f in all_files if f.name not in processed_files]
                 
                 # Check for upstream completion
-                gather_complete = (self.run_root / "_gather_complete").exists()
+                gather_complete = (self.input_dir / "_raw_complete").exists()
                 if not new_files:
                     if gather_complete:
                         log("Upstream (Gather) is complete and all files processed. Signaling Prep completion.")
@@ -235,12 +235,15 @@ class DataPrepService:
                     "backend": "GPU" if self.gpu_mode else "CPU"
                 }
                 atomic_write(self.output_dir / "_status.json", json.dumps(status))
-                
-                # Create/Update completion marker to signal downstream
-                if not (self.output_dir / "_prep_complete").exists():
-                     atomic_write(self.output_dir / "_prep_complete")
             except Exception as e:
                 log(f"Status update failed: {e}")
+
+        # Signaling Prep completion OUTSIDE the loop
+        try:
+            log("Creating final _prep_complete marker.")
+            atomic_write(self.output_dir / "_prep_complete")
+        except Exception as e:
+            log(f"Marker creation failed: {e}")
 
     def _process_cpu_polars(self, files: List[Path]) -> int:
         file_pattern = str(self.input_dir / "worker_*.parquet")

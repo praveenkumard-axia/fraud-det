@@ -335,7 +335,10 @@ spec:
       - name: wait-for-prep
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ $(ls /fraud-benchmark/runs/run-default/gpu/data/raw | wc -l) -ge 1000 ]; do echo waiting for 1k files; sleep 10; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -436,10 +439,23 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      - name: wait-for-prep
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/cpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/cpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
@@ -529,10 +545,23 @@ spec:
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
+      - name: wait-for-prep
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
       - name: wait-for-model
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/models/fraud_xgboost/_status.json ]; do echo waiting for model; sleep 5; done"]
+        env:
+        - name: RUN_ID
+          value: "run-default"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
