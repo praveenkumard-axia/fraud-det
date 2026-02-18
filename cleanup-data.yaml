@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: manual-cleanup-job
+  namespace: fraud-det
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      containers:
+      - name: cleanup
+        image: busybox
+        command: ["sh", "-c", "echo 'Cleaning up run-20260218-151230...'; rm -rf /fraud-benchmark/runs/run-20260218-151230; echo 'Done'; ls -la /fraud-benchmark/runs/"]
+        volumeMounts:
+        - name: storage
+          mountPath: /fraud-benchmark
+      restartPolicy: Never
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: fraud-benchmark-pvc
