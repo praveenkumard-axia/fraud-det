@@ -315,14 +315,12 @@ async def run_pipeline_sequence():
         # For this function to return, we just start them and let them run in background.
         # But we should update state.
         
-        # 5. Start Log Monitoring
-        asyncio.create_task(monitor_logs(run_id))
         
     except Exception as e:
         logger.error(f"Pipeline Execution Failure: {e}")
-        state.is_running = False # Only set False on launch failure
-    
-    logger.info(f"Pipeline {run_id} launched successfully.")
+    finally:
+        state.is_running = False
+        logger.info(f"Pipeline {run_id} sequence triggers complete.")
 
 
 # ==================== Metric Sources (Prometheus) ====================
@@ -440,81 +438,20 @@ def get_from_db() -> Optional[Dict]:
 
 @app.get("/api/machine/metrics")
 async def get_machine_metrics():
-    """Production System Metrics (Real PromQL -> DB Fallback)"""
+    """Production System Metrics (Real PromQL Only)"""
+    # Get Real Data where possible
+    cpu_util = await get_prometheus_metric('100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)')
+    gpu_util = await get_prometheus_metric('avg(DCGM_FI_DEV_GPU_UTIL)')
     
-    # 1. Try DB Primary (Fast Local)
-    db_data = get_from_db()
+    # FlashBlade (Real)
+    fb_read = await get_prometheus_metric('purefb_array_read_bytes_per_sec') / (1024**2) 
+    fb_write = await get_prometheus_metric('purefb_array_write_bytes_per_sec') / (1024**2)
+    fb_util_raw = await get_prometheus_metric('purefb_hardware_component_utilization')
     
-    if db_data:
-        cpu_util = db_data.get('cpu_util', 0)
-        gpu_util = db_data.get('gpu_util', 0)
-        fb_read = db_data.get('fb_read_mbps', 0)
-        fb_write = db_data.get('fb_write_mbps', 0)
-        nfs_err = db_data.get('nfs_errors', 0)
-        gpu_power = db_data.get('gpu_power', 0)
-        
-        # Calculate derived
-        fb_lat = 1000 # Mock or need to add to parser
-        fb_util_raw = min(1.0, fb_lat / 5000.0) 
-        cpu_tp = fb_read + fb_write
-        gpu_tp = fb_read * 2 
-        
-        # OOM/Disk/FC not in parser yet, use defaults or 0
-        oom_rate = 0
-        disk_pressure = 0
-        fc_online = 4
-        
-        triton_rps = db_data.get('throughput_gpu', 0) # Mapped from parser
-
-    else:
-        # 2. Fallback to Direct Prometheus Query
-        # Get Real Data where possible
-        cpu_util = await get_prometheus_metric('100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)')
-        gpu_util = await get_prometheus_metric('avg(DCGM_FI_DEV_GPU_UTIL)')
-        
-        # FlashBlade (OpenMetrics)
-        # purefb_array_performance_throughput_bytes{dimension="read"}
-        fb_read = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="read"}') / (1024**2) 
-        fb_write = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="write"}') / (1024**2)
-        # purefb_array_performance_latency_usec{dimension="usec_per_read_op"}
-        # Utilization Proxy: If latency > 1ms (1000us), we consider it busy.
-        # Scale: 0-100 based on latency up to 5ms.
-        fb_lat = await get_prometheus_metric('purefb_array_performance_latency_usec{dimension="usec_per_read_op"}')
-        fb_util_raw = min(1.0, fb_lat / 5000.0) 
-        
-        # Throughput (Real)
-        cpu_tp = fb_read + fb_write 
-        gpu_tp = fb_read * 2 
-        
-        # --- Infrastructure Health ---
-        # NFS Errors (Binary: 0=OK, >0=Error)
-        nfs_err = await get_prometheus_metric('sum(node_filesystem_device_error{device=~".*fraud.*"})') or 0
-        
-        # Fibre Channel Links (Count Online)
-        fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})') or 0
-        # Assuming 4 ports total is the healthy state
-        
-        # OOM Kills (Rate per minute)
-        oom_rate = await get_prometheus_metric('rate(node_vmstat_oom_kill[5m]) * 60') or 0
-        
-        # Disk Write Pressure (proxy for saturation on dm-3/dm-4)
-        disk_pressure = await get_prometheus_metric('rate(node_disk_write_time_seconds_total{device=~"dm-3|dm-4"}[1m])') or 0
-
-        # --- Business Metrics (Triton) ---
-        # Inference Throughput (Req/sec)
-        triton_rps = await get_prometheus_metric('sum(rate(nv_inference_request_success[1m]))') or 0
-        
-        # GPU Logic Redefined: If util is 0 but power is high, use power proxy
-        # Max Power for L40 is ~300W. 
-        gpu_power = await get_prometheus_metric('avg(DCGM_FI_DEV_POWER_USAGE)') or 0
-
-    if gpu_util == 0 and gpu_power > 50:
-         gpu_util = (gpu_power / 300.0) * 100 # Proxy util based on power
-
-    # Update state telemetry if real metrics available
-    if triton_rps > 0:
-        state.telemetry["inference_gpu"] = int(triton_rps * 60) # Convert to 'per minute' for consistency? Or just update rate.
-
+    # Throughput (Real)
+    cpu_tp = fb_read + fb_write # correlated for demo
+    gpu_tp = fb_read * 2 # GPU usually reads faster
+    
     return {
         "is_running": state.is_running,
         "elapsed_sec": (time.time() - state.start_time) if state.start_time else 0,
@@ -769,107 +706,12 @@ async def alerts_websocket(websocket: WebSocket):
     except WebSocketDisconnect:
         active_ws.remove(websocket)
 
-# ==================== Log Monitoring & Reconciliation ====================
-
-# Track pods already being tailed to avoid duplicate streamers
-_TAILED_PODS: set = set()
-
-async def monitor_logs(run_id: str):
-    """Background task to discover pods and start log tailers"""
-    logger.info(f"Starting log monitor for run {run_id}")
-    
-    while state.is_running:
-        try:
-            pods = k8s_core.list_namespaced_pod("fraud-det", label_selector=f"run_id={run_id}")
-            for pod in pods.items:
-                name = pod.metadata.name
-                if name not in _TAILED_PODS and pod.status.phase in ["Running", "Succeeded"]:
-                    _TAILED_PODS.add(name)
-                    asyncio.create_task(tail_pod_logs(name))
-            
-            await asyncio.sleep(5)
-        except Exception as e:
-            logger.error(f"Monitor loop error: {e}")
-            await asyncio.sleep(5)
-
-async def tail_pod_logs(pod_name: str):
-    """Stream logs from a pod using kubectl logs --follow (non-blocking async subprocess)."""
-    logger.info(f"Tailing logs for {pod_name}")
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "kubectl", "logs", "-n", "fraud-det",
-            "--follow", "--tail=0", pod_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        
-        while state.is_running:
-            line_bytes = await proc.stdout.readline()
-            if not line_bytes:  # EOF — pod finished
-                break
-            
-            line = line_bytes.decode("utf-8", errors="replace").rstrip()
-            data = parse_telemetry_line(line)
-            if not data:
-                continue
-            
-            with state.lock:
-                stage = data.get("stage", "")
-                
-                if "Ingest" in stage:
-                    state.telemetry["generated"] = data.get("rows", 0)
-                    state.telemetry["throughput"] = data.get("throughput", 0)
-                    
-                elif "Data Prep" in stage:
-                    if "gpu" in pod_name:
-                        state.telemetry["data_prep_gpu"] = data.get("rows", 0)
-                    else:
-                        state.telemetry["data_prep_cpu"] = data.get("rows", 0)
-                        
-                elif "Inference" in stage:
-                    if "gpu" in pod_name:
-                        state.telemetry["inference_gpu"] = data.get("rows", 0)
-                    else:
-                        state.telemetry["inference_cpu"] = data.get("rows", 0)
-                
-                if "cpu_cores" in data:
-                    state.telemetry["cpu_percent"] = data["cpu_cores"]
-                if "ram_percent" in data:
-                    state.telemetry["ram_percent"] = data["ram_percent"]
-        
-        # Clean up the subprocess
-        try:
-            proc.kill()
-        except Exception:
-            pass
-            
-    except Exception as e:
-        logger.warning(f"Log tail ended for {pod_name}: {e}")
-    finally:
-        _TAILED_PODS.discard(pod_name)
-
-@app.on_event("startup")
-async def startup_event():
-    """Recover state on restart"""
-    logger.info("Backend Startup: Checking for active runs...")
-    try:
-        # Check if any pods are running
-        pods = k8s_core.list_namespaced_pod("fraud-det", label_selector="app=fraud-benchmark")
-        active_pods = [p for p in pods.items if p.status.phase in ["Running", "Pending"]]
-        
-        if active_pods:
-            # Infer run_id
-            run_id = active_pods[0].metadata.labels.get("run_id")
-            if run_id:
-                logger.info(f"Recovered active run: {run_id}")
-                state.run_id = run_id
-                state.is_running = True
-                state.start_time = active_pods[0].metadata.creation_timestamp.timestamp()
-                
-                # Restart monitoring
-                asyncio.create_task(monitor_logs(run_id))
-    except Exception as e:
-        logger.error(f"Startup recovery failed: {e}")
+async def broadcast_alert(msg: str, level: str = "info"):
+    """Broadcast alert to all connected WebSocket clients"""
+    payload = json.dumps({"level": level, "msg": msg, "time": datetime.now(timezone.utc).isoformat()})
+    for ws in active_ws:
+        try: await ws.send_text(payload)
+        except: pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -881,7 +723,7 @@ async def shutdown_event():
         try: await ws.close()
         except: pass
 
-@app.post("/api/control/reset-data-legacy")
+@app.post("/api/control/reset-data-legacy") # Rename/Remove duplicate
 async def reset_data():
     state.reset()
     return {"success": True, "message": "Metrics reset"}
