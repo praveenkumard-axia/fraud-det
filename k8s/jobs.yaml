@@ -167,7 +167,7 @@ spec:
         nvidia.com/gpu.present: "true"
       initContainers:
       - name: check-gpu
-        image: nvcr.io/nvidia/cuda:12.2.1-base-ubuntu22.04
+        image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
 
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
@@ -258,7 +258,7 @@ spec:
         nvidia.com/gpu.present: "true"
       initContainers:
       - name: check-gpu
-        image: nvcr.io/nvidia/cuda:12.2.1-base-ubuntu22.04
+        image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
 
         imagePullPolicy: IfNotPresent
         command: ["sh", "-c", "nvidia-smi && echo 'GPU OK'"]
