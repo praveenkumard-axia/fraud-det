@@ -357,9 +357,18 @@ async def get_business_metrics():
     if txns_scored == 0:
         txns_scored = await get_prometheus_metric('sum(generated_records_total)')
 
+    # Fallback to log telemetry if Prometheus is empty/failing
+    if txns_scored == 0:
+        txns_scored = state.telemetry.get("generated", 0)
+
     # 2. Real Fraud Metrics
     fraud_blocked = await get_prometheus_metric(f'sum(fraud_detected_total{{run_id="{run_id}"}})')
+    if fraud_blocked == 0:
+        pass 
+
     throughput = await get_prometheus_metric(f'sum(records_per_second{{run_id="{run_id}"}})')
+    if throughput == 0:
+        throughput = state.telemetry.get("throughput", 0)
     
     # 3. Derived Metrics (Safe Defaults)
     fpm = (fraud_blocked / max(1, txns_scored)) * 1_000_000

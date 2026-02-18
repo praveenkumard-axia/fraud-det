@@ -248,7 +248,6 @@ class DataPrepService:
 
     def _process_gpu(self, files: List[Path]) -> int:
         # Simplified dask_cudf path
-        # Simplified dask_cudf path
         import dask_cudf
         try:
             ddf = dask_cudf.read_parquet([str(f) for f in files])
