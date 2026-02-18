@@ -199,6 +199,10 @@ spec:
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/raw"
         - name: OUTPUT_DIR
           value: "/fraud-benchmark/runs/$(RUN_ID)/gpu/data/features"
+        - name: RMM_DEBUG_LOG_FILE
+          value: "/fraud-benchmark/logs/rmm.log"
+        - name: TMPDIR
+          value: "/fraud-benchmark/tmp"
         resources:
           requests:
             cpu: "1"
