@@ -3,6 +3,7 @@ import json
 import sqlite3
 import time
 import requests
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -194,7 +195,7 @@ def main():
     
     # continuous mode
     if "--monitor" in sys.argv:
-        url = "http://10.23.181.153:9090/metrics" 
+        url = os.getenv("PROMETHEUS_URL", "http://10.23.181.153:9090") + "/metrics" 
         monitor(url)
         return
 
@@ -210,7 +211,7 @@ def main():
             
     # Mode 2: Fetch from URL (Default)
     else:
-        url = "http://10.23.181.153:9090/metrics" # Node Exporter or Fed Endpoint
+        url = os.getenv("PROMETHEUS_URL", "http://10.23.181.153:9090") + "/metrics" # Node Exporter or Fed Endpoint
         print(f"Fetching from {url}...")
         try:
             r = requests.get(url, timeout=5)

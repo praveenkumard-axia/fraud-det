@@ -322,8 +322,8 @@ async def run_pipeline_sequence():
 
 # ==================== Metric Sources (Prometheus) ====================
 
-PROMETHEUS_URL = "http://10.23.181.153:9090"
-FB_EXPORTER_URL = "http://10.23.181.153:9300"
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://10.23.181.153:9090")
+FB_EXPORTER_URL = os.getenv("FB_EXPORTER_URL", "http://10.23.181.153:9300")
 
 async def get_prometheus_metric(query: str) -> float:
     """Fetch a single scalar value from Prometheus"""
