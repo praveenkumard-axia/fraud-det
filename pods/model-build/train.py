@@ -239,9 +239,26 @@ def main():
         model, duration = trainer.train(X_train, y_train)
         
         # Real metrics for the dashboard
+        from sklearn.metrics import precision_score, recall_score
+        
+        # Generate predictions
+        dtest = xgb.DMatrix(X_test)
+        y_pred = model.predict(dtest)
+        predictions = [round(value) for value in y_pred]
+        
+        # Handle GPU data (cudf/cupy) -> CPU (numpy) for sklearn
+        y_test_cpu = y_test
+        if hasattr(y_test, "to_numpy"):
+            y_test_cpu = y_test.to_numpy()
+        elif hasattr(y_test, "values"): # cudf sometimes
+            try:
+                y_test_cpu = y_test.values.get() # cupy to numpy
+            except:
+                pass
+
         metrics = {
-            "precision": 0.92, # Placeholder or calculated
-            "recall": 0.89,
+            "precision": float(precision_score(y_test_cpu, predictions, zero_division=0)),
+            "recall": float(recall_score(y_test_cpu, predictions, zero_division=0)),
             "samples_per_sec": len(X_train)/duration
         }
         PRECISION_GAUGE.set(metrics["precision"])
