@@ -213,41 +213,21 @@ async def cleanup_pipeline_markers(run_id: str):
     except Exception as e:
         logger.warning(f"Marker cleanup failed (non-fatal): {e}")
 
-async def wait_for_file_count(directory: Path, pattern: str, count: int, interval: int = 10):
-    """Wait until the number of files matching pattern in directory reaches count"""
-    logger.info(f"Waiting for {count} files in {directory} (pattern: {pattern})...")
+async def wait_for_telemetry_threshold(key: str, threshold: int, interval: int = 10):
+    """Wait until a specific telemetry value reaches a threshold"""
+    logger.info(f"Waiting for telemetry mapping['{key}'] to reach {threshold}...")
     while state.is_running:
         try:
-            files = list(directory.glob(pattern))
-            current = len(files)
-            if current >= count:
-                logger.info(f"Threshold reached: {current} files found.")
+            current = state.telemetry.get(key, 0)
+            if current >= threshold:
+                logger.info(f"Telemetry threshold reached: {current} >= {threshold}")
                 return True
-            logger.info(f"Current count: {current}/{count}. Sleeping {interval}s...")
+            logger.info(f"Telemetry '{key}': {current}/{threshold}. Sleeping {interval}s...")
         except Exception as e:
-            logger.error(f"Error counting files: {e}")
+            logger.error(f"Error checking telemetry: {e}")
         await asyncio.sleep(interval)
     return False
 
-async def wait_for_prep_records(status_path: Path, threshold: int, interval: int = 10):
-    """Wait until the Prep pod's status.json shows total_records >= threshold"""
-    logger.info(f"Waiting for Prep to process {threshold} records (status: {status_path})...")
-    while state.is_running:
-        try:
-            if status_path.exists():
-                with open(status_path, "r") as f:
-                    status = json.load(f)
-                    current = status.get("total_records", 0)
-                    if current >= threshold:
-                        logger.info(f"Prep threshold reached: {current} records processed.")
-                        return True
-                    logger.info(f"Prep current: {current}/{threshold}. Sleeping {interval}s...")
-            else:
-                logger.info(f"Waiting for Prep status file: {status_path}...")
-        except Exception as e:
-            logger.error(f"Error reading Prep status: {e}")
-        await asyncio.sleep(interval)
-    return False
 
 async def scale_job_parallelism(job_name: str, parallelism: int):
     """Scale a K8s Job by setting its parallelism (Pause/Resume)"""
@@ -277,17 +257,28 @@ async def monitor_job_logs(job_name: str, run_id: str):
         tele_key = mapping.get(job_name)
         if not tele_key: return
 
-        # 1. Wait for pod to appear
+        # 1. Wait for pod to be RUNNING and container to be READY
         pod_name = None
-        for _ in range(15): # 30 seconds wait
+        for _ in range(30): # 60 seconds wait
             p_list = k8s_core.list_namespaced_pod(namespace="fraud-det", label_selector=f"job-name={job_name}")
             if p_list.items:
-                pod_name = p_list.items[0].metadata.name
-                break
+                pod = p_list.items[0]
+                # Check status
+                phase = pod.status.phase
+                container_statuses = pod.status.container_statuses or []
+                
+                # We need the main container to be at least initialized or running
+                # Log streaming results in 400 if it's still in PodInitializing
+                is_ready = any(cs.state.running for cs in container_statuses if cs.name in ["gather", "prep", "infer", "train"])
+                
+                if phase == "Running" and is_ready:
+                    pod_name = pod.metadata.name
+                    break
+                logger.info(f"Pod {pod.metadata.name} is in phase {phase}. Waiting for Readiness...")
             await asyncio.sleep(2)
         
         if not pod_name:
-            logger.warning(f"Timeout waiting for pod of job {job_name}")
+            logger.warning(f"Timeout waiting for ACTIVE pod of job {job_name}")
             return
 
         logger.info(f"Monitoring logs for {pod_name} -> state.telemetry['{tele_key}']")
@@ -383,15 +374,17 @@ async def run_k8s_job(job_name: str, run_id: str):
         
         # 5. Wait for Completion (Pipeline Integrity)
         logger.info(f"Waiting for {job_name} to complete...")
+        not_found_retries = 0
         while True:
             # SAFETY: Break if pipeline is stopped
             if not state.is_running:
                 logger.info(f"Aborting wait for {job_name} - pipeline stopped.")
                 break
                 
-            await asyncio.sleep(4) # Slightly longer poll
+            await asyncio.sleep(4) 
             try:
                 status = k8s_batch.read_namespaced_job_status(job_name, "fraud-det")
+                not_found_retries = 0 # Reset on success
                 if status.status.succeeded:
                     logger.info(f"Job {job_name} succeeded.")
                     break
@@ -399,8 +392,14 @@ async def run_k8s_job(job_name: str, run_id: str):
                     logger.error(f"Job {job_name} failed.")
                     break
             except client.exceptions.ApiException as e:
-                # Job might disappear or network issue
-                logger.warning(f"Error polling job {job_name}: {e}")
+                if e.status == 404:
+                    not_found_retries += 1
+                    if not_found_retries > 5:
+                        logger.error(f"Job {job_name} not found after 5 retries. Aborting.")
+                        break
+                    logger.warning(f"Job {job_name} not found (polling retry {not_found_retries}/5)")
+                else:
+                    logger.warning(f"Error polling job {job_name}: {e}")
                 
     except Exception as e:
         logger.error(f"K8s Native Creation Failed for {job_name}: {e}")
@@ -424,29 +423,23 @@ async def run_pipeline_sequence():
         asyncio.create_task(run_k8s_job("data-prep-cpu", run_id))
         asyncio.create_task(run_k8s_job("data-prep-gpu", run_id))
         
-        # 3. Wait-for-10k: Trigger Training
-        raw_data_dir = Path(f"/fraud-benchmark/runs/{run_id}/gpu/data/raw")
-        prep_status_gpu = Path(f"/fraud-benchmark/runs/{run_id}/gpu/data/features/_status.json")
+        # 3. Wait-for-10k: Trigger Training (TELEMETRY BASED)
+        # We no longer rely on file system checks which are environment-dependent
         
-        # Ensure dir exists (init pods might still be creating it)
-        for _ in range(10):
-            if raw_data_dir.exists(): break
-            await asyncio.sleep(2)
-            
-        # Step A: Wait for 10,000 raw files to be gathered
-        threshold_reached = await wait_for_file_count(raw_data_dir, "worker_*.parquet", 10000)
+        # Step A: Wait for 10,000 records to be GATHERED
+        gather_reached = await wait_for_telemetry_threshold("generated", 10000)
         
-        if not threshold_reached:
-            logger.warning("Pipeline stop requested or timeout. Aborting flow.")
+        if not gather_reached:
+            logger.warning("Pipeline stop requested or gather timeout. Aborting flow.")
             return
 
-        # Step B: Wait for Prep to finish that 10k batch
-        prep_reached = await wait_for_prep_records(prep_status_gpu, 10000)
+        # Step B: Wait for 10,000 records to be PREPROCESSED (GPU)
+        prep_reached = await wait_for_telemetry_threshold("data_prep_gpu", 10000)
         
         if not prep_reached:
             logger.warning("Pipeline stop requested or prep timeout. Aborting flow.")
             return
-
+        
         # 4. PHASE 2: Pause Prep for Training (Free up GPUs)
         logger.info("PHASE 2: Pausing Prep Jobs for Training...")
         # Note: We scale to 0 to stop the pods and release GPU memory
