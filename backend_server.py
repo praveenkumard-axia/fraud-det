@@ -417,48 +417,92 @@ async def get_business_metrics():
         }
     }
 
+def get_from_db() -> Optional[Dict]:
+    """Fetch latest metrics from local SQLite DB"""
+    try:
+        import sqlite3
+        if not Path("telemetry.db").exists(): return None
+        conn = sqlite3.connect("telemetry.db")
+        c = conn.cursor()
+        c.execute("SELECT raw_data FROM metrics ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return json.loads(row[0])
+    except Exception as e:
+        logger.error(f"DB Read Error: {e}")
+    return None
+
 @app.get("/api/machine/metrics")
 async def get_machine_metrics():
-    """Production System Metrics (Real PromQL Only)"""
-    # Get Real Data where possible
-    cpu_util = await get_prometheus_metric('100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)')
-    gpu_util = await get_prometheus_metric('avg(DCGM_FI_DEV_GPU_UTIL)')
+    """Production System Metrics (Real PromQL -> DB Fallback)"""
     
-    # FlashBlade (OpenMetrics)
-    # purefb_array_performance_throughput_bytes{dimension="read"}
-    fb_read = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="read"}') / (1024**2) 
-    fb_write = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="write"}') / (1024**2)
-    # purefb_array_performance_latency_usec{dimension="usec_per_read_op"}
-    # Utilization Proxy: If latency > 1ms (1000us), we consider it busy.
-    # Scale: 0-100 based on latency up to 5ms.
-    fb_lat = await get_prometheus_metric('purefb_array_performance_latency_usec{dimension="usec_per_read_op"}')
-    fb_util_raw = min(1.0, fb_lat / 5000.0) 
+    # 1. Try DB Primary (Fast Local)
+    db_data = get_from_db()
     
-    # Throughput (Real)
-    cpu_tp = fb_read + fb_write 
-    gpu_tp = fb_read * 2 
-    
-    # --- Infrastructure Health ---
-    # NFS Errors (Binary: 0=OK, >0=Error)
-    nfs_err = await get_prometheus_metric('sum(node_filesystem_device_error{device=~".*fraud.*"})') or 0
-    
-    # Fibre Channel Links (Count Online)
-    fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})') or 0
-    # Assuming 4 ports total is the healthy state
-    
-    # OOM Kills (Rate per minute)
-    oom_rate = await get_prometheus_metric('rate(node_vmstat_oom_kill[5m]) * 60') or 0
-    
-    # Disk Write Pressure (proxy for saturation on dm-3/dm-4)
-    disk_pressure = await get_prometheus_metric('rate(node_disk_write_time_seconds_total{device=~"dm-3|dm-4"}[1m])') or 0
+    if db_data:
+        cpu_util = db_data.get('cpu_util', 0)
+        gpu_util = db_data.get('gpu_util', 0)
+        fb_read = db_data.get('fb_read_mbps', 0)
+        fb_write = db_data.get('fb_write_mbps', 0)
+        nfs_err = db_data.get('nfs_errors', 0)
+        gpu_power = db_data.get('gpu_power', 0)
+        
+        # Calculate derived
+        fb_lat = 1000 # Mock or need to add to parser
+        fb_util_raw = min(1.0, fb_lat / 5000.0) 
+        cpu_tp = fb_read + fb_write
+        gpu_tp = fb_read * 2 
+        
+        # OOM/Disk/FC not in parser yet, use defaults or 0
+        oom_rate = 0
+        disk_pressure = 0
+        fc_online = 4
+        
+        triton_rps = db_data.get('throughput_gpu', 0) # Mapped from parser
 
-    # --- Business Metrics (Triton) ---
-    # Inference Throughput (Req/sec)
-    triton_rps = await get_prometheus_metric('sum(rate(nv_inference_request_success[1m]))') or 0
-    
-    # GPU Logic Redefined: If util is 0 but power is high, use power proxy
-    # Max Power for L40 is ~300W. 
-    gpu_power = await get_prometheus_metric('avg(DCGM_FI_DEV_POWER_USAGE)') or 0
+    else:
+        # 2. Fallback to Direct Prometheus Query
+        # Get Real Data where possible
+        cpu_util = await get_prometheus_metric('100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)')
+        gpu_util = await get_prometheus_metric('avg(DCGM_FI_DEV_GPU_UTIL)')
+        
+        # FlashBlade (OpenMetrics)
+        # purefb_array_performance_throughput_bytes{dimension="read"}
+        fb_read = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="read"}') / (1024**2) 
+        fb_write = await get_prometheus_metric('purefb_array_performance_throughput_bytes{dimension="write"}') / (1024**2)
+        # purefb_array_performance_latency_usec{dimension="usec_per_read_op"}
+        # Utilization Proxy: If latency > 1ms (1000us), we consider it busy.
+        # Scale: 0-100 based on latency up to 5ms.
+        fb_lat = await get_prometheus_metric('purefb_array_performance_latency_usec{dimension="usec_per_read_op"}')
+        fb_util_raw = min(1.0, fb_lat / 5000.0) 
+        
+        # Throughput (Real)
+        cpu_tp = fb_read + fb_write 
+        gpu_tp = fb_read * 2 
+        
+        # --- Infrastructure Health ---
+        # NFS Errors (Binary: 0=OK, >0=Error)
+        nfs_err = await get_prometheus_metric('sum(node_filesystem_device_error{device=~".*fraud.*"})') or 0
+        
+        # Fibre Channel Links (Count Online)
+        fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})') or 0
+        # Assuming 4 ports total is the healthy state
+        
+        # OOM Kills (Rate per minute)
+        oom_rate = await get_prometheus_metric('rate(node_vmstat_oom_kill[5m]) * 60') or 0
+        
+        # Disk Write Pressure (proxy for saturation on dm-3/dm-4)
+        disk_pressure = await get_prometheus_metric('rate(node_disk_write_time_seconds_total{device=~"dm-3|dm-4"}[1m])') or 0
+
+        # --- Business Metrics (Triton) ---
+        # Inference Throughput (Req/sec)
+        triton_rps = await get_prometheus_metric('sum(rate(nv_inference_request_success[1m]))') or 0
+        
+        # GPU Logic Redefined: If util is 0 but power is high, use power proxy
+        # Max Power for L40 is ~300W. 
+        gpu_power = await get_prometheus_metric('avg(DCGM_FI_DEV_POWER_USAGE)') or 0
+
     if gpu_util == 0 and gpu_power > 50:
          gpu_util = (gpu_power / 300.0) * 100 # Proxy util based on power
 
