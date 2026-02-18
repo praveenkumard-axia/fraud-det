@@ -29,6 +29,6 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 1Ti
+      storage: 20Ti
   volumeName: fraud-benchmark-pv
   storageClassName: ""
