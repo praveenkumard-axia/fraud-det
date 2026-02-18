@@ -19,7 +19,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: fix-permissions
         image: busybox
@@ -105,7 +106,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: fix-permissions
         image: busybox
@@ -196,7 +198,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
@@ -303,7 +306,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: check-gpu
         image: nvcr.io/nvidia/cuda:12.2.2-base-ubuntu22.04
@@ -419,7 +423,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: fix-permissions
         image: busybox
@@ -525,7 +530,8 @@ spec:
       priorityClassName: high-priority-tier
       restartPolicy: Never
       securityContext:
-        fsGroup: 1000
+        runAsUser: 0
+        fsGroup: 0
       initContainers:
       - name: fix-permissions
         image: busybox
