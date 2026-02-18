@@ -248,12 +248,25 @@ class DataPrepService:
 
     def _process_gpu(self, files: List[Path]) -> int:
         # Simplified dask_cudf path
+        # Simplified dask_cudf path
         import dask_cudf
         try:
             ddf = dask_cudf.read_parquet([str(f) for f in files])
-        except Exception as e:
-            log(f"Failed to read batch (skipping): {e}")
-            return 0
+        except Exception as batch_error:
+            log(f"Batch read failed: {batch_error}. Retrying individually...")
+            valid_files = []
+            for f in files:
+                try:
+                    # quick check
+                    dask_cudf.read_parquet(str(f))
+                    valid_files.append(str(f))
+                except Exception as e:
+                    log(f"Skipping corrupted file {f.name}: {e}")
+            
+            if not valid_files:
+                return 0
+                
+            ddf = dask_cudf.read_parquet(valid_files)
         
         # Feature Engineering Pipeline (GPU)
         ddf['amt_log'] = ddf['amt'].map_partitions(lambda s: cp.log1p(s))

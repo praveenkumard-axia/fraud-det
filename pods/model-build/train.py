@@ -187,7 +187,8 @@ class ModelTrainer:
         params = {
             'objective': 'binary:logistic',
             'eval_metric': ['auc'],
-            'tree_method': 'gpu_hist' if self.gpu_mode else 'hist',
+            'tree_method': 'hist',
+            'device': 'cuda' if self.gpu_mode else 'cpu',
         }
         
         model = xgb.train(params, dtrain, num_boost_round=100)
