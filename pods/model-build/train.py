@@ -139,26 +139,17 @@ class ModelTrainer:
         log.info("=" * 70)
 
     def wait_for_upstream(self) -> bool:
-        """Wait for _prep_complete marker and actual data files."""
+        """Wait for _prep_complete marker."""
         marker = self.input_dir / "_prep_complete"
         log.info(f"Waiting for upstream marker: {marker}")
         
         start_wait = time.time()
-        while True:
-            # 1. Check for marker
-            if marker.exists():
-                # 2. Check for actual files (racing condition fix)
-                files = list(self.input_dir.glob("*.parquet"))
-                if files:
-                    log.info(f"Upstream ready. Found {len(files)} parquet files.")
-                    return True
-                else:
-                    log.warning(f"Marker found but no .parquet files yet in {self.input_dir}. Waiting...")
-            
+        while not marker.exists():
             if (time.time() - start_wait) > self.max_wait:
-                log.error("TIMEOUT: Upstream marker (or data) not found.")
+                log.error("TIMEOUT: Upstream marker not found.")
                 return False
             time.sleep(10)
+        return True
 
     def prepare_data(self) -> Tuple[Any, Any, Any, Any, List[str]]:
         files = sorted(self.input_dir.glob("*.parquet"))
