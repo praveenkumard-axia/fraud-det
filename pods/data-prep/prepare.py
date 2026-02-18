@@ -117,10 +117,12 @@ class DataPrepService:
         # Preflight GPU check — fall back to CPU if CUDA device is unavailable
         if self.gpu_mode:
             try:
+                import cupy as cp
                 device_count = cp.cuda.runtime.getDeviceCount()
                 if device_count == 0:
                     raise RuntimeError("No CUDA devices found")
-                log(f"GPU preflight OK: {device_count} device(s) available")
+                cp.cuda.Device(0).use()
+                log(f"GPU Context initialized. {device_count} device(s) available")
             except Exception as e:
                 log(f"GPU preflight FAILED ({e}). Falling back to CPU (Polars).")
                 self.gpu_mode = False

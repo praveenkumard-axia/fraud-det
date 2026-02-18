@@ -32,32 +32,27 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, status="Running", preserve_total=False):
-    """Write structured telemetry to logs for dashboard parsing."""
+    """Standardized Telemetry Format for Dashboard Parsing"""
     try:
         # Read previous total if preserving
         previous_total = 0
         if preserve_total:
-            # Parse last telemetry entry from logs to get previous row count
             try:
-                with open("pipeline_report.txt", "r") as f:
-                    lines = f.readlines()
-                    for line in reversed(lines[-100:]):  # Check last 100 lines
-                        if "[TELEMETRY]" in line and "stage=" in line:
-                            # Parse the previous stage's row count
-                            parts = line.split("|")
-                            for part in parts:
-                                if "rows=" in part:
-                                    prev_rows = int(part.split("=")[1].strip())
-                                    # Only preserve if from different stage
-                                    if "stage=Model Train" not in line:
-                                        previous_total = prev_rows
-                                    break
-                            break
+                stats_path = Path("stats.json")
+                if stats_path.exists():
+                    with open(stats_path, "r") as f:
+                        prev_data = json.load(f)
+                        if prev_data.get("stage") == "Model Train":
+                            previous_total = prev_data.get("rows", 0)
             except:
                 pass
         
         total_rows = (previous_total + rows) if preserve_total else rows
-        telemetry = f"[TELEMETRY] stage=Model Train | status={status} | rows={int(total_rows)} | throughput={int(throughput)} | elapsed={round(elapsed, 1)} | cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        telemetry = (
+            f"[TELEMETRY] stage=Model Train | status={status} | rows={int(total_rows)} | "
+            f"throughput={int(throughput)} | elapsed={round(elapsed, 1)} | "
+            f"cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        )
         print(telemetry, flush=True)
     except:
         pass
@@ -181,7 +176,20 @@ class ModelTrainer:
 
     def train(self, X_train, y_train):
         start = time.time()
-        dtrain = xgb.DMatrix(X_train, label=y_train)
+        
+        # PRO FIX: Use QuantileDMatrix for GPU-accelerated RAPIDS integration
+        # and better memory management.
+        if self.gpu_mode:
+            log.info("Initializing QuantileDMatrix (GPU)...")
+            try:
+                # Explicit CUDA context management
+                cp.cuda.Device(0).use()
+                dtrain = xgb.QuantileDMatrix(X_train, label=y_train)
+            except Exception as e:
+                log.warning(f"QuantileDMatrix failed: {e}. Falling back to standard DMatrix.")
+                dtrain = xgb.DMatrix(X_train, label=y_train)
+        else:
+            dtrain = xgb.DMatrix(X_train, label=y_train)
         
         params = {
             'objective': 'binary:logistic',

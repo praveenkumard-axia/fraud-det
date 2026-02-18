@@ -62,6 +62,18 @@ class InferenceClient:
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         
+        # GPU Mode Check
+        self.gpu_mode = os.getenv('EXECUTION_TYPE', 'cpu') == 'gpu'
+        if self.gpu_mode:
+            try:
+                import cupy as cp
+                import cudf
+                cp.cuda.Device(0).use()
+                self.log("GPU Context initialized for Inference.")
+            except Exception as e:
+                self.log(f"GPU check failed for Inference: {e}. Falling back to CPU (Polars).")
+                self.gpu_mode = False
+        
         log_telemetry(0, 0, 0, psutil.cpu_count(), 0, 0, status="Initializing")
 
     def wait_for_model(self) -> bool:
@@ -130,12 +142,20 @@ class InferenceClient:
                     self.log(f"Processing: {target_file.name}")
                     try:
                         start_time = time.time()
-                        df = pl.read_parquet(target_file)
-                        row_count = df.shape[0]
-                        X = df.drop(["is_fraud"])
-                        if 'category' in X.columns: X = X.drop(['category']) 
                         
-                        dmatrix = xgb.DMatrix(X.to_pandas())
+                        if self.gpu_mode:
+                            import cudf
+                            df = cudf.read_parquet(str(target_file))
+                            X = df.drop(columns=["is_fraud"])
+                            if 'category' in X.columns: X = X.drop(columns=['category'])
+                            dmatrix = xgb.DMatrix(X)
+                        else:
+                            df = pl.read_parquet(target_file)
+                            X = df.drop(["is_fraud"])
+                            if 'category' in X.columns: X = X.drop(['category']) 
+                            dmatrix = xgb.DMatrix(X.to_pandas())
+                        
+                        row_count = df.shape[0]
                         preds = model.predict(dmatrix)
                         
                         # Statistics

@@ -4,7 +4,7 @@ metadata:
   name: fraud-benchmark-pv
 spec:
   capacity:
-    storage: 20Ti
+    storage: 1Ti
   accessModes:
     - ReadWriteMany
   nfs:
@@ -29,6 +29,6 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 20Ti
+      storage: 1Ti
   volumeName: fraud-benchmark-pv
   storageClassName: ""

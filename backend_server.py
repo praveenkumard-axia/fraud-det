@@ -194,6 +194,75 @@ except:
 k8s_batch = client.BatchV1Api()
 k8s_core = client.CoreV1Api()
 
+async def cleanup_pipeline_markers(run_id: str):
+    """Delete stale completion markers to ensure a fresh flow"""
+    try:
+        run_root = Path(f"/financial-fraud-detection-demo/runs/{run_id}") # Use fixed NFS path if possible or infer
+        # In reality, the backend usually sees the mount at /fraud-benchmark
+        run_root = Path(f"/fraud-benchmark/runs/{run_id}")
+        
+        markers = ["_gather_complete", "_prep_complete", "STOP"]
+        for m in markers:
+            p_cpu = run_root / "cpu/data/features" / m
+            p_gpu = run_root / "gpu/data/features" / m
+            p_root = run_root / m
+            for p in [p_cpu, p_gpu, p_root]:
+                if p.exists():
+                    p.unlink()
+                    logger.info(f"Cleaned up stale marker: {p.name}")
+    except Exception as e:
+        logger.warning(f"Marker cleanup failed (non-fatal): {e}")
+
+async def wait_for_file_count(directory: Path, pattern: str, count: int, interval: int = 10):
+    """Wait until the number of files matching pattern in directory reaches count"""
+    logger.info(f"Waiting for {count} files in {directory} (pattern: {pattern})...")
+    while state.is_running:
+        try:
+            files = list(directory.glob(pattern))
+            current = len(files)
+            if current >= count:
+                logger.info(f"Threshold reached: {current} files found.")
+                return True
+            logger.info(f"Current count: {current}/{count}. Sleeping {interval}s...")
+        except Exception as e:
+            logger.error(f"Error counting files: {e}")
+        await asyncio.sleep(interval)
+    return False
+
+async def wait_for_prep_records(status_path: Path, threshold: int, interval: int = 10):
+    """Wait until the Prep pod's status.json shows total_records >= threshold"""
+    logger.info(f"Waiting for Prep to process {threshold} records (status: {status_path})...")
+    while state.is_running:
+        try:
+            if status_path.exists():
+                with open(status_path, "r") as f:
+                    status = json.load(f)
+                    current = status.get("total_records", 0)
+                    if current >= threshold:
+                        logger.info(f"Prep threshold reached: {current} records processed.")
+                        return True
+                    logger.info(f"Prep current: {current}/{threshold}. Sleeping {interval}s...")
+            else:
+                logger.info(f"Waiting for Prep status file: {status_path}...")
+        except Exception as e:
+            logger.error(f"Error reading Prep status: {e}")
+        await asyncio.sleep(interval)
+    return False
+
+async def scale_job_parallelism(job_name: str, parallelism: int):
+    """Scale a K8s Job by setting its parallelism (Pause/Resume)"""
+    logger.info(f"Scaling Job {job_name} parallelism to {parallelism}")
+    try:
+        k8s_batch.patch_namespaced_job(
+            name=job_name,
+            namespace="fraud-det",
+            body={"spec": {"parallelism": parallelism}}
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Failed to scale Job {job_name}: {e}")
+        return False
+
 async def monitor_job_logs(job_name: str, run_id: str):
     """Tail logs of a specific job and parse telemetry lines (Standardized)"""
     try:
@@ -337,49 +406,77 @@ async def run_k8s_job(job_name: str, run_id: str):
         logger.error(f"K8s Native Creation Failed for {job_name}: {e}")
 
 async def run_pipeline_sequence():
-    """Enterprise Pipeline Orchestration (Native K8s)"""
+    """Enterprise Pipeline Orchestration (Native K8s) - Orchestrated Flow"""
     state.is_running = True
-    # run_id is passed in or generated BEFORE this function
-    run_id = state.run_id
-    if not run_id:
-        run_id = state.generate_run_id()
+    run_id = state.run_id or state.generate_run_id()
     state.start_time = time.time()
     
     try:
-        # Continuous Pipeline: Launch EVERYTHING in parallel
-        # Each component handles its own dependencies (polling)
+        logger.info(f"Starting Orchestrated Pipeline {run_id}...")
         
-        logger.info(f"Starting Continuous Pipeline {run_id}...")
+        # 1. Fresh Start: Cleanup stale markers
+        await cleanup_pipeline_markers(run_id)
         
-        # 1. Generator (Infinite)
-        task_gather = asyncio.create_task(run_k8s_job("data-gather", run_id))
+        # 2. Phase 1: Ingest & Preprocess (Start background jobs)
+        logger.info("PHASE 1: Starting Data Ingest & Preprocessing...")
+        asyncio.create_task(run_k8s_job("data-gather", run_id))
+        await asyncio.sleep(5) # Init delay
+        asyncio.create_task(run_k8s_job("data-prep-cpu", run_id))
+        asyncio.create_task(run_k8s_job("data-prep-gpu", run_id))
         
-        # Give generator a head start to create pools/dirs?
-        await asyncio.sleep(5)
+        # 3. Wait-for-10k: Trigger Training
+        raw_data_dir = Path(f"/fraud-benchmark/runs/{run_id}/gpu/data/raw")
+        prep_status_gpu = Path(f"/fraud-benchmark/runs/{run_id}/gpu/data/features/_status.json")
         
-        # 2. Prep (Infinite)
-        task_prep_cpu = asyncio.create_task(run_k8s_job("data-prep-cpu", run_id))
-        task_prep_gpu = asyncio.create_task(run_k8s_job("data-prep-gpu", run_id))
+        # Ensure dir exists (init pods might still be creating it)
+        for _ in range(10):
+            if raw_data_dir.exists(): break
+            await asyncio.sleep(2)
+            
+        # Step A: Wait for 10,000 raw files to be gathered
+        threshold_reached = await wait_for_file_count(raw_data_dir, "worker_*.parquet", 10000)
         
-        # 3. Model Train (Runs once after data available, or repeatedly?)
-        # For now, we launch it. It should wait for _prep_complete (written by prep after batch 1)
-        task_train = asyncio.create_task(run_k8s_job("model-train-gpu", run_id))
+        if not threshold_reached:
+            logger.warning("Pipeline stop requested or timeout. Aborting flow.")
+            return
+
+        # Step B: Wait for Prep to finish that 10k batch
+        prep_reached = await wait_for_prep_records(prep_status_gpu, 10000)
         
-        # 4. Inference (Infinite)
-        task_inf_cpu = asyncio.create_task(run_k8s_job("inference-cpu", run_id))
-        task_inf_gpu = asyncio.create_task(run_k8s_job("inference-gpu", run_id))
+        if not prep_reached:
+            logger.warning("Pipeline stop requested or prep timeout. Aborting flow.")
+            return
+
+        # 4. PHASE 2: Pause Prep for Training (Free up GPUs)
+        logger.info("PHASE 2: Pausing Prep Jobs for Training...")
+        # Note: We scale to 0 to stop the pods and release GPU memory
+        await scale_job_parallelism("data-prep-cpu", 0)
+        await scale_job_parallelism("data-prep-gpu", 0)
+        await asyncio.sleep(15) # Longer grace period to ensure pods are gone and GPU is free
         
-        # We do NOT await them, because they run forever (until stop).
-        # But we might want to track them?
-        # For this function to return, we just start them and let them run in background.
-        # But we should update state.
+        # 5. Training: Run once to completion
+        logger.info("PHASE 3: Running Model Training...")
+        # run_k8s_job for training will wait until the Job succeeds
+        await run_k8s_job("model-train-gpu", run_id)
         
+        # 6. PHASE 4: Resume & Infer
+        logger.info("PHASE 4: Resuming Prep and Starting Inference...")
+        # Scale back to default or desired parallelism
+        await scale_job_parallelism("data-prep-cpu", 4) 
+        await scale_job_parallelism("data-prep-gpu", 1)
+        
+        # Start Inference background tasks
+        asyncio.create_task(run_k8s_job("inference-cpu", run_id))
+        asyncio.create_task(run_k8s_job("inference-gpu", run_id))
+        
+        logger.info("Pipeline reaching steady-state (Inference active).")
         
     except Exception as e:
         logger.error(f"Pipeline Execution Failure: {e}")
     finally:
-        state.is_running = False
-        logger.info(f"Pipeline {run_id} sequence triggers complete.")
+        # We don't set is_running = False here if we want inference to keep running
+        # Only set False if something crashed early
+        logger.info(f"Pipeline {run_id} orchestration sequence finished.")
 
 
 # ==================== Metric Sources (Prometheus) ====================
