@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Set, Tuple
+import shutil
 
 import numpy as np
 import psutil
@@ -175,7 +176,7 @@ class DataPrepService:
                     time.sleep(1)
                     continue
 
-                batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '500'))
+                batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '50'))
                 if len(new_files) > batch_limit:
                     log(f"Found {len(new_files)} new files. Capping current batch to {batch_limit} for stability.")
                     new_files = new_files[:batch_limit]
@@ -340,9 +341,18 @@ class DataPrepService:
         
         timestamp = int(time.time() * 1000)
         # dask_cudf writes a DIRECTORY of part files, not a single file.
-        # Write directly to the final path — dask handles the commit internally.
-        output_dir = self.output_dir / f"features_batch_{timestamp}.parquet"
-        ddf.to_parquet(str(output_dir), write_metadata_file=True)
+        # Atomic write: Write to .tmp directory first, then rename.
+        final_output_dir = self.output_dir / f"features_batch_{timestamp}.parquet"
+        temp_output_dir = self.output_dir / f"features_batch_{timestamp}.parquet.tmp"
+        
+        # Clean up temp dir if it exists from a previous failed run
+        if temp_output_dir.exists():
+            shutil.rmtree(str(temp_output_dir), ignore_errors=True)
+            
+        ddf.to_parquet(str(temp_output_dir), write_metadata_file=True)
+        
+        # Atomic rename
+        os.rename(str(temp_output_dir), str(final_output_dir))
         # Compute row count from partition lengths (avoids re-reading the data)
         try:
             row_count = int(ddf.map_partitions(len).compute().sum())
