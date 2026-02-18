@@ -79,11 +79,15 @@ def log(msg):
     print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
 def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, status="Running"):
-    """Write structured telemetry to logs for dashboard parsing."""
+    """Standardized Telemetry Format for Dashboard Parsing"""
     try:
-        telemetry = f"[TELEMETRY] stage=Ingest | status={status} | rows={int(rows)} | throughput={int(throughput)} | elapsed={round(elapsed, 1)} | cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        telemetry = (
+            f"[TELEMETRY] stage=Data Gather | status={status} | rows={int(rows)} | "
+            f"throughput={int(throughput)} | elapsed={round(elapsed, 1)} | "
+            f"cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        )
         print(telemetry, flush=True)
-    except: 
+    except:
         pass
 
 
@@ -208,7 +212,9 @@ base_time = 1704067200  # 2024-01-01
 
 # Generate until duration expires
 start = time.time()
-file_count = 0
+# RESTART ROBUSTNESS: Find latest file sequence to avoid overwrites
+existing_files = list(output_dir.glob(f"worker_{worker_id:03d}_*.parquet"))
+file_count = len(existing_files)
 
 # Define Schema for better performance
 schema = pa.schema([

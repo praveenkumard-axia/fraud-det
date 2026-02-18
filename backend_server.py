@@ -18,6 +18,8 @@ from typing import Dict, Optional, List, Tuple
 import yaml
 import tempfile
 import json
+import httpx
+from kubernetes import watch
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -192,6 +194,57 @@ except:
 k8s_batch = client.BatchV1Api()
 k8s_core = client.CoreV1Api()
 
+async def monitor_job_logs(job_name: str, run_id: str):
+    """Tail logs of a specific job and parse telemetry lines (Standardized)"""
+    try:
+        # Mapping Job names to telemetry keys used in state.telemetry
+        mapping = {
+            "data-gather": "generated",
+            "data-prep-cpu": "data_prep_cpu",
+            "data-prep-gpu": "data_prep_gpu",
+            "inference-cpu": "inference_cpu",
+            "inference-gpu": "inference_gpu"
+        }
+        tele_key = mapping.get(job_name)
+        if not tele_key: return
+
+        # 1. Wait for pod to appear
+        pod_name = None
+        for _ in range(15): # 30 seconds wait
+            p_list = k8s_core.list_namespaced_pod(namespace="fraud-det", label_selector=f"job-name={job_name}")
+            if p_list.items:
+                pod_name = p_list.items[0].metadata.name
+                break
+            await asyncio.sleep(2)
+        
+        if not pod_name:
+            logger.warning(f"Timeout waiting for pod of job {job_name}")
+            return
+
+        logger.info(f"Monitoring logs for {pod_name} -> state.telemetry['{tele_key}']")
+        
+        # 2. Stream logs in a separate thread to avoid blocking the event loop
+        def tail_and_parse():
+            w = watch.Watch()
+            for event in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
+                if not state.is_running: break
+                line = event
+                if "[TELEMETRY]" in line:
+                    try:
+                        # [TELEMETRY] stage=... | rows=123 | ...
+                        parts = line.split("|")
+                        for p in parts:
+                            if "rows=" in p:
+                                val = int(p.split("=")[1].strip())
+                                state.telemetry[tele_key] = val
+                    except: pass
+            w.stop()
+
+        await asyncio.to_thread(tail_and_parse)
+        
+    except Exception as e:
+        logger.error(f"Log monitor failed for {job_name}: {e}")
+
 async def run_k8s_job(job_name: str, run_id: str):
     """Native Kubernetes Job Creation with RUN_ID Injection"""
     logger.info(f"K8s Native: Launching Job {job_name} (Run: {run_id})")
@@ -254,12 +307,20 @@ async def run_k8s_job(job_name: str, run_id: str):
 
         # 4. Create Job
         k8s_batch.create_namespaced_job(namespace="fraud-det", body=job_doc)
-        logger.info(f"Native Job {job_name} created successfully with RUN_ID={run_id}")
+        logger.info(f"Job {job_name} launched for run {run_id}")
+        
+        # PRO ROBUSTNESS: Monitor logs for telemetry parsing
+        asyncio.create_task(monitor_job_logs(job_name, run_id))
         
         # 5. Wait for Completion (Pipeline Integrity)
         logger.info(f"Waiting for {job_name} to complete...")
         while True:
-            await asyncio.sleep(3) # Poll interval
+            # SAFETY: Break if pipeline is stopped
+            if not state.is_running:
+                logger.info(f"Aborting wait for {job_name} - pipeline stopped.")
+                break
+                
+            await asyncio.sleep(4) # Slightly longer poll
             try:
                 status = k8s_batch.read_namespaced_job_status(job_name, "fraud-det")
                 if status.status.succeeded:
@@ -267,8 +328,6 @@ async def run_k8s_job(job_name: str, run_id: str):
                     break
                 if status.status.failed:
                     logger.error(f"Job {job_name} failed.")
-                    # In a real pipeline, we might want to throw here, but for now we log and proceed
-                    # to allow partial pipeline data inspection
                     break
             except client.exceptions.ApiException as e:
                 # Job might disappear or network issue
@@ -329,16 +388,15 @@ PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://10.23.181.153:9090")
 FB_EXPORTER_URL = os.getenv("FB_EXPORTER_URL", "http://10.23.181.153:9300")
 
 async def get_prometheus_metric(query: str) -> float:
-    """Fetch a single scalar value from Prometheus"""
+    """Fetch a single scalar value from Prometheus (Asynchronous)"""
     try:
-        import requests
-        params = {"query": query}
-        # Use longer timeout for production robustness
-        r = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params=params, timeout=5)
-        if r.ok:
-            results = r.json().get("data", {}).get("result", [])
-            if results:
-                return float(results[0]["value"][1])
+        async with httpx.AsyncClient() as client:
+            params = {"query": query}
+            r = await client.get(f"{PROMETHEUS_URL}/api/v1/query", params=params, timeout=5.0)
+            if r.status_code == 200:
+                results = r.json().get("data", {}).get("result", [])
+                if results:
+                    return float(results[0]["value"][1])
     except Exception as e:
         logger.error(f"Prometheus query failed: {e}")
     return 0.0
@@ -451,6 +509,13 @@ async def get_machine_metrics():
     # Throughput (Real)
     cpu_tp = fb_read + fb_write # correlated for demo
     gpu_tp = fb_read * 2 # GPU usually reads faster
+    
+    # Missing metrics (Real-ish)
+    triton_rps = await get_prometheus_metric('sum(triton_request_success_count)')
+    nfs_err = await get_prometheus_metric('sum(node_filesystem_device_error)')
+    fc_online = await get_prometheus_metric('count(node_fibrechannel_info{port_state="Online"})')
+    oom_rate = await get_prometheus_metric('rate(node_vmstat_oom_kill[5m])')
+    disk_pressure = await get_prometheus_metric('avg(node_pressure_io_waiting_seconds_total)')
     
     return {
         "is_running": state.is_running,
@@ -595,62 +660,60 @@ async def start_pipeline_control():
 @app.post("/api/control/stop")
 @app.post("/api/pipeline/stop")
 async def stop_pipeline_control():
-    """Stop the pipeline"""
-    # Reuse existing cleanup logic but ensure contract return
+    """Stop the pipeline and clean up resources"""
     state.is_running = False
     run_id = state.run_id or "run-default"
     
-    # 1. Signal Pods to Stop via Shared Volume
+    # 1. Signal Pods to Stop via Shared Volume (if backend is mounted)
     try:
-        # Create STOP marker in the run directory
-        run_dir = Path(f"/fraud-benchmark/runs/{run_id}") # Mounted path in backend
+        # Check if we are running in K8s and have the mount
+        run_dir = Path(f"/fraud-benchmark/runs/{run_id}")
         if run_dir.exists():
              with open(run_dir / "STOP", "w") as f:
                  f.write(datetime.now().isoformat())
              logger.info(f"Signal STOP sent to {run_dir}")
     except Exception as e:
-        logger.error(f"Failed to write STOP signal: {e}")
+        logger.warning(f"Could not write STOP signal (likely no PVC mount in backend): {e}")
 
-    # 2. Wait briefly to allow pods to see the signal (optional, e.g. 5s)
-    await asyncio.sleep(5)
-
-    # 3. Native K8s Deletion by Label
+    # 2. Native K8s Deletion by Label (Foreground to ensure cleanup before return)
     try:
         k8s_batch.delete_collection_namespaced_job(
             namespace="fraud-det",
             label_selector=f"run_id={run_id}",
-            propagation_policy='Background'
+            propagation_policy='Foreground'
         )
-    except: pass
-    
-    # 4. Cleanup Data (As requested by User)
-    try:
-        # We invoke a helper pod or use the backend's mount to delete
-        # Assuming backend mounts /fraud-benchmark at the same path
-        if run_dir.exists():
-            import shutil
-            shutil.rmtree(str(run_dir))
-            logger.info(f"Deleted data for run {run_id}")
+        logger.info(f"Deleted Job collection for run_id={run_id}")
     except Exception as e:
-        logger.error(f"Failed to clean up data: {e}")
-
-    return {"status": "stopped", "message": "Pipeline stopped and data cleaned"}
+        logger.error(f"Failed to delete Job collection: {e}")
+    
+    return {"status": "stopped", "message": "Pipeline stop sequence initiated"}
 
 @app.post("/api/control/scale")
 async def scale(component: str = "all", cpu: str = "4", memory: str = "8Gi", gpu: int = 0):
-    """Update resource limits for next run (and restart if requested - not impl here)"""
+    """Update resource limits and restart relevant jobs to apply changes"""
     logger.info(f"Scale request: {component} -> CPU:{cpu} MEM:{memory} GPU:{gpu}")
     
-    # Store in state for next run_k8s_job execution
+    relevant_jobs = []
     if component == "all":
-        # Apply to all relevant jobs
-        jobs = ["data-prep-cpu", "data-prep-gpu", "inference-cpu", "inference-gpu", "model-train-gpu"]
-        for j in jobs:
-            state.resource_overrides[j] = {"cpu": cpu, "memory": memory, "gpu": gpu}
+        relevant_jobs = ["data-prep-cpu", "data-prep-gpu", "inference-cpu", "inference-gpu", "model-train-gpu"]
     else:
-        state.resource_overrides[component] = {"cpu": cpu, "memory": memory, "gpu": gpu}
+        relevant_jobs = [component]
+
+    for j in relevant_jobs:
+        state.resource_overrides[j] = {"cpu": cpu, "memory": memory, "gpu": gpu}
         
-    return {"status": "scaled", "component": component, "overrides": state.resource_overrides.get(component)}
+    # If pipeline is running, proactively restart only the targeted jobs
+    if state.is_running and state.run_id:
+        logger.info(f"Pipeline is active. Restarting jobs {relevant_jobs} to apply new limits.")
+        for j in relevant_jobs:
+            asyncio.create_task(run_k8s_job(j, state.run_id))
+            
+    return {
+        "status": "scaled", 
+        "component": component, 
+        "overrides": state.resource_overrides.get(component if component != "all" else relevant_jobs[0]),
+        "restarted": state.is_running
+    }
 
 @app.post("/api/control/throttle")
 async def throttle(percent: int = 100):

@@ -21,8 +21,17 @@ def signal_handler(signum, frame):
 import signal
 signal.signal(signal.SIGINT, signal_handler)
 
-def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, status="Running"):
-    print(f"[TELEMETRY] stage=Inference | status={status} | rows={int(rows)} | throughput={int(throughput)} | elapsed={round(elapsed,1)} | cpu_cores={round(cpu_cores,1)} | ram_gb={round(mem_gb,2)} | ram_percent={round(mem_percent,1)}")
+def log_telemetry(rows, tps, elapsed, cpu_cores, ram_gb, ram_percent, status="Running"):
+    """Standardized Telemetry Format for Dashboard Parsing"""
+    try:
+        telemetry = (
+            f"[TELEMETRY] stage=Inference | status={status} | rows={int(rows)} | "
+            f"throughput={int(tps)} | elapsed={round(elapsed, 1)} | "
+            f"cpu_cores={round(cpu_cores, 1)} | ram_gb={round(ram_gb, 2)} | ram_percent={round(ram_percent, 1)}"
+        )
+        print(telemetry, flush=True)
+    except:
+        pass
 
 # Prometheus Metrics
 REGISTRY = CollectorRegistry()
@@ -72,98 +81,113 @@ class InferenceClient:
         print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
     def run_continuous(self):
-        self.log(f"Starting Continuous Inference Benchmark: {self.run_id}")
+        """Continuous inference loop with checkpointing."""
+        checkpoint_path = self.model_dir / ".processed_features.json"
+        processed_files = set()
+        total_rows = 0
         
+        if checkpoint_path.exists():
+            try:
+                with open(checkpoint_path, 'r') as f:
+                    processed_files = set(json.load(f))
+                self.log(f"Resuming from checkpoint: {len(processed_files)} files already processed.")
+            except Exception as e:
+                self.log(f"Failed to load checkpoint: {e}")
+
         # Load model
         model = xgb.Booster()
         model.load_model(str(self.model_dir / "1" / "xgboost.json"))
         
-        processed_files = set()
+        latencies = []
+        start_bench = time.time()
+        total_txns = 0
+        fraud_count = 0
         
         while not STOP_FLAG:
-            # Check STOP
+            # Check for STOP signal on disk
             if (self.run_root / "STOP").exists():
-                self.log("STOP signal detected. Exiting...")
+                self.log("STOP signal detected on disk. Exiting...")
                 break
                 
-            # Scan for new files
             try:
                 all_files = sorted(self.data_dir.glob("*.parquet"))
                 new_files = [f for f in all_files if f.name not in processed_files]
-            except Exception:
-                time.sleep(1)
-                continue
                 
-            if not new_files:
-                time.sleep(1)
-                continue
-            
-            # Use only one file per iteration to keep TPS stable and "streaming"
-            target_file = new_files[0]
-            
-            try:
-                df = pl.read_parquet(target_file)
-                X = df.drop(["is_fraud"])
-                if 'category' in X.columns: X = X.drop(['category']) 
-                dmatrix = xgb.DMatrix(X.to_pandas())
+                if not new_files:
+                    time.sleep(1)
+                    continue
                 
-                # Start Timing
-                latencies = []
-                fraud_count = 0
-                total_txns = len(X)
-                
-                start_bench = time.time()
-                # Run prediction once for the batch
-                batch_start = time.time()
-                preds = model.predict(dmatrix)
-                batch_elapsed = (time.time() - batch_start) * 1000 # ms
-                latencies.append(batch_elapsed / total_txns)
-                fraud_indices = preds > 0.5
-                fraud_count += int(fraud_indices.sum())
-                
-                duration = time.time() - start_bench
-                avg_tps = total_txns / duration if duration > 0 else 0
-                
-                # Mark processed (only if successful)
-                processed_files.add(target_file.name)
-                
-                # Calculate Percentiles
-                p95 = np.percentile(latencies, 95)
-                p99 = np.percentile(latencies, 99)
-                
-                # Push Metrics
-                TPS_GAUGE.set(avg_tps)
-                P95_GAUGE.set(p95)
-                P99_GAUGE.set(p99)
-                FRAUD_COUNTER.inc(fraud_count)
-                
-                # Metrics Push
-                try:
-                    push_to_gateway(self.push_gateway, job='inference', 
-                                    grouping_key={'run_id': self.run_id}, registry=REGISTRY)
-                except Exception as e:
-                    pass
+                for target_file in new_files:
+                    if STOP_FLAG: break
+                    if (self.run_root / "STOP").exists(): break
+                    
+                    self.log(f"Processing: {target_file.name}")
+                    try:
+                        start_time = time.time()
+                        df = pl.read_parquet(target_file)
+                        row_count = df.shape[0]
+                        X = df.drop(["is_fraud"])
+                        if 'category' in X.columns: X = X.drop(['category']) 
+                        
+                        dmatrix = xgb.DMatrix(X.to_pandas())
+                        preds = model.predict(dmatrix)
+                        
+                        # Statistics
+                        txn_latency = (time.time() - start_time) * 1000
+                        latencies.append(txn_latency)
+                        total_txns += row_count
+                        
+                        fraud_indices = preds > 0.5
+                        fraud_count += int(fraud_indices.sum())
+                        
+                        duration = time.time() - start_bench
+                        avg_tps = total_txns / duration if duration > 0 else 0
+                        
+                        total_rows += row_count
+                        processed_files.add(target_file.name)
+                        
+                        # Update checkpoint
+                        with open(checkpoint_path, 'w') as f:
+                            json.dump(list(processed_files), f)
+                        
+                        # Calculate Percentiles
+                        p95 = np.percentile(latencies, 95) if latencies else 0
+                        p99 = np.percentile(latencies, 99) if latencies else 0
+                        
+                        # Push Metrics
+                        TPS_GAUGE.set(avg_tps)
+                        P95_GAUGE.set(p95)
+                        P99_GAUGE.set(p99)
+                        FRAUD_COUNTER.inc(fraud_count)
+                        
+                        try:
+                            push_to_gateway(self.push_gateway, job='inference', 
+                                            grouping_key={'run_id': self.run_id}, registry=REGISTRY)
+                        except: pass
 
-                # Atomic Status for Dashboard
-                status = {
-                    "stage": "inference",
-                    "state": "running",
-                    "run_id": self.run_id,
-                    "metrics": {
-                        "tps": avg_tps,
-                        "p95_latency_ms": p95,
-                        "p99_latency_ms": p99,
-                        "fraud_detected": fraud_count
-                    },
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                atomic_write(self.model_dir / "../inference_status.json", json.dumps(status))
-                
-                print(f"BATCH: {avg_tps:.1f} TPS | p95={p95:.4f}ms | Fraud={fraud_count}")
-                
+                        # Atomic Status for Dashboard
+                        status_msg = {
+                            "stage": "inference",
+                            "state": "running",
+                            "run_id": self.run_id,
+                            "metrics": {
+                                "tps": avg_tps,
+                                "p95_latency_ms": p95,
+                                "p99_latency_ms": p99,
+                                "fraud_detected": fraud_count
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                        atomic_write(self.model_dir / "../inference_status.json", json.dumps(status_msg))
+                        log_telemetry(total_rows, avg_tps, duration, 0, 0, 0)
+                        
+                    except Exception as e:
+                        self.log(f"Error processing file {target_file}: {e}")
+                        processed_files.add(target_file.name) # Skip bad file
+            
             except Exception as e:
-                self.log(f"Error processing file {target_file}: {e}")
-                processed_files.add(target_file.name) # Skip bad file
+                self.log(f"Error in inference loop: {e}")
+                time.sleep(1)
 
 def main():
     start_http_server(8000)

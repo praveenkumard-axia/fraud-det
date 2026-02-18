@@ -42,32 +42,29 @@ def log(msg):
     print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
 def log_telemetry(rows, throughput, elapsed, cpu_cores, mem_gb, mem_percent, status="Running", preserve_total=False):
-    """Write structured telemetry to logs for dashboard parsing."""
+    """Standardized Telemetry Format for Dashboard Parsing"""
     try:
         # Read previous total if preserving
         previous_total = 0
         if preserve_total:
-            # Parse last telemetry entry from logs to get previous row count
+            # We used to parse logs, but now we should ideally use a state file.
+            # However, for backward compatibility with the user's setup:
             try:
-                with open("pipeline_report.txt", "r") as f:
-                    lines = f.readlines()
-                    for line in reversed(lines[-100:]):  # Check last 100 lines
-                        if "[TELEMETRY]" in line and "stage=" in line:
-                            # Parse the previous stage's row count
-                            parts = line.split("|")
-                            for part in parts:
-                                if "rows=" in part:
-                                    prev_rows = int(part.split("=")[1].strip())
-                                    # Only preserve if from different stage
-                                    if "stage=Data Prep" not in line:
-                                        previous_total = prev_rows
-                                    break
-                            break
+                stats_path = Path("stats.json")
+                if stats_path.exists():
+                    with open(stats_path, "r") as f:
+                        prev_data = json.load(f)
+                        if prev_data.get("stage") == "Data Prep":
+                            previous_total = prev_data.get("rows", 0)
             except:
                 pass
         
         total_rows = previous_total + rows if preserve_total else rows
-        telemetry = f"[TELEMETRY] stage=Data Prep | status={status} | rows={int(total_rows)} | throughput={int(throughput)} | elapsed={round(elapsed, 1)} | cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        telemetry = (
+            f"[TELEMETRY] stage=Data Prep | status={status} | rows={int(total_rows)} | "
+            f"throughput={int(throughput)} | elapsed={round(elapsed, 1)} | "
+            f"cpu_cores={round(cpu_cores, 1)} | ram_gb={round(mem_gb, 2)} | ram_percent={round(mem_percent, 1)}"
+        )
         print(telemetry, flush=True)
     except:
         pass
@@ -137,8 +134,16 @@ class DataPrepService:
         log("=" * 70)
 
     def process_continuous(self):
-        """Continuous processing loop."""
+        """Continuous processing loop with checkpointing."""
+        checkpoint_path = self.output_dir / ".processed_files.json"
         processed_files = set()
+        if checkpoint_path.exists():
+            try:
+                with open(checkpoint_path, 'r') as f:
+                    processed_files = set(json.load(f))
+                log(f"Resuming from checkpoint: {len(processed_files)} files already processed.")
+            except Exception as e:
+                log(f"Failed to load checkpoint: {e}")
         
         log("Starting continuous processing loop...")
         
@@ -154,6 +159,15 @@ class DataPrepService:
                 # Filter out temp files from atomic writes just in case
                 all_files = [f for f in all_files if not f.name.endswith('.tmp')]
                 new_files = [f for f in all_files if f.name not in processed_files]
+                
+                # Check for upstream completion
+                gather_complete = (self.run_root / "_gather_complete").exists()
+                if not new_files:
+                    if gather_complete:
+                        log("Upstream (Gather) is complete and all files processed. Signaling Prep completion.")
+                        break # Exit the while loop to write _prep_complete
+                    time.sleep(1)
+                    continue
             except Exception as e:
                 log(f"Error scanning files: {e}")
                 time.sleep(1)
@@ -180,9 +194,10 @@ class DataPrepService:
             
             duration = time.time() - start_batch
             
-            # 3. Mark as processed
+            # 3. Mark as processed & update checkpoint
             for f in new_files:
                 processed_files.add(f.name)
+            atomic_write(checkpoint_path, json.dumps(list(processed_files)))
                 
             # 4. Metrics & Telemetry
             tps = row_count / duration if duration > 0 else 0
