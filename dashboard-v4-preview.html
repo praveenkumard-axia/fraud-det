@@ -1946,15 +1946,17 @@
     function updateDashboard(data) {
       const b = data.business || {};
       const p = b.pods || {};
-      const gen = p.generation || {};
-      const prep = p.prep || {};
-      const inf = p.inference || {};
+      const gen = p.generation || data.Generation || {};
+      const prep = p.prep || data.Preparation || {};
+      const inf = p.inference || data.Inference || {};
+      const model = data.Model || {};
       const backlog = data.backlog || {};
       const rawBacklog = (backlog.raw || 0) + (backlog.features || 0);
       const kpis = data.kpis || {};
 
       if (document.getElementById('kpi-fraud-usd')) {
-        const fraudUsd = (b.no_fraud || 0) * 50;
+        const fraud_count = inf.fraud ?? b.no_fraud ?? 0;
+        const fraudUsd = fraud_count * 50;
         // Only update if non-zero (prevent resetting)
         if (fraudUsd > 0) {
           document.getElementById('kpi-fraud-usd').textContent = '$' + (fraudUsd >= 1e3 ? (fraudUsd / 1e3).toFixed(0) + 'K' : fraudUsd);
@@ -1962,8 +1964,8 @@
       }
 
       // Only update KPIs if new value is non-zero (prevent resetting good values)
-      const txnsAnalyzed = b.no_of_processed || 0;
-      const highRisk = b.no_fraud || 0;
+      const txnsAnalyzed = model.transactions_analyzed ?? b.no_of_processed ?? 0;
+      const highRisk = inf.fraud ?? b.no_fraud ?? 0;
       if (document.getElementById('kpi-txns-analyzed') && txnsAnalyzed > 0) {
         document.getElementById('kpi-txns-analyzed').textContent = fmtNum(txnsAnalyzed);
       }
@@ -2035,7 +2037,7 @@
           const bar = document.getElementById('tech-prep-gpu-bar');
           bar.style.width = Math.min(100, (prepTotal / maxVal) * 100) + '%'; bar.textContent = fmtNum(Math.floor(prepTotal * 0.6));
         }
-        const infTotal = (inf.fraud || 0) + (inf.non_fraud || 0) || b.no_of_processed || 0;
+        const infTotal = (inf.fraud || 0) + (inf.non_fraud || 0) || txnsAnalyzed;
         if (document.getElementById('tech-infer-cpu')) document.getElementById('tech-infer-cpu').textContent = fmtNum(Math.floor(infTotal * 0.3));
         if (document.getElementById('tech-infer-cpu-bar')) {
           const bar = document.getElementById('tech-infer-cpu-bar');

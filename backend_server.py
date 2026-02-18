@@ -581,7 +581,13 @@ async def get_business_metrics():
             "precision": 0.943,
             "recall": 0.918,
             "accuracy": 0.962
-        }
+        },
+        # Aliases for frontend compatibility
+        "fraud_exposure_identified": int(fraud_blocked * 50),
+        "fraud_rate": (fraud_blocked / max(1, txns_scored)),
+        "alerts_per_million": round(fpm, 2),
+        "high_risk_txn_rate": (fraud_blocked / max(1, txns_scored)),
+        "projected_annual_savings": int(fraud_blocked * 50 * 12) # Mock projection
     }
 
 def get_from_db() -> Optional[Dict]:
