@@ -151,17 +151,33 @@ class ModelTrainer:
         if not files:
             raise FileNotFoundError(f"No feature files in {self.input_dir}")
             
-        # Fast load 1M samples
-        # Fix: Pass explicit file list instead of glob string to avoid "expanded paths were empty" error
-        # despite files existing (which we verified with `glob` above).
+        # Fast load 1M samples - PRODUCTION ROBUST LOAD
+        # Iterate files individually to isolate corruption
         file_paths = [str(f) for f in files]
-        df = pl.scan_parquet(file_paths).head(1000000).collect()
+        dfs = []
+        
+        for p in file_paths:
+            try:
+                log.info(f"Reading parquet batch: {p}")
+                # Use read_parquet instead of scan to force immediate validation
+                batch_df = pl.read_parquet(p)
+                if len(batch_df) > 0:
+                    dfs.append(batch_df)
+            except Exception as e:
+                log.warning(f"Skipping corrupted batch {p}: {e}")
+        
+        if not dfs:
+            raise RuntimeError("No valid parquet batches found (all files corrupted or empty)")
+            
+        # Concatenate valid batches
+        df = pl.concat(dfs).head(1000000)
         
         if self.gpu_mode:
             import cudf
+            # Convert directly via arrow or pandas
             df = cudf.from_pandas(df.to_pandas())
         else:
-            # Fallback to Pandas for .iloc compatibility if on CPU
+            # CPU Mode: Convert to pandas for XGBoost compatibility
             df = df.to_pandas()
         
         available_feats = [c for c in FEATURE_COLUMNS if c in df.columns]

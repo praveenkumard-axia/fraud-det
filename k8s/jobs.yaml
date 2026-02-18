@@ -67,7 +67,7 @@ spec:
         - name: TMPDIR
           value: "/fraud-benchmark/tmp"
         - name: PYTHONUNBUFFERED
-          value: "0"
+          value: "1"
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
