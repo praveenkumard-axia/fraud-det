@@ -108,11 +108,12 @@ class DataPrepService:
         self.run_id = os.getenv('RUN_ID', 'run-default')
         self.run_root = Path(f"/fraud-benchmark/runs/{self.run_id}")
         
-        self.input_dir = Path(os.getenv('INPUT_DIR', f"{self.run_root}/cpu/data/raw"))
-        self.output_dir = Path(os.getenv('OUTPUT_DIR', f"{self.run_root}/cpu/data/features"))
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        
         self.gpu_mode = GPU_AVAILABLE and (os.getenv('FORCE_CPU', 'false').lower() != 'true')
+        
+        exec_type = "gpu" if self.gpu_mode else "cpu"
+        self.input_dir = Path(os.getenv('INPUT_DIR', f"{self.run_root}/{exec_type}/data/raw"))
+        self.output_dir = Path(os.getenv('OUTPUT_DIR', f"{self.run_root}/{exec_type}/data/features"))
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
 

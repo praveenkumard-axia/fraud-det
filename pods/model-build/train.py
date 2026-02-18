@@ -134,8 +134,8 @@ class ModelTrainer:
         log.info("=" * 70)
 
     def wait_for_upstream(self) -> bool:
-        """Wait for _prep_complete marker."""
-        marker = self.input_dir / "_prep_complete"
+        """Wait for _prep_ready_for_train marker."""
+        marker = self.input_dir / "_prep_ready_for_train"
         log.info(f"Waiting for upstream marker: {marker}")
         
         start_wait = time.time()

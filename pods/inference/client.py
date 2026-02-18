@@ -56,14 +56,15 @@ class InferenceClient:
         self.run_id = os.getenv('RUN_ID', 'run-default')
         self.run_root = Path(f"/fraud-benchmark/runs/{self.run_id}")
         
-        # In benchmark, we use the CPU models path as source of truth for metadata
-        self.model_dir = Path(os.getenv('MODEL_DIR', f"{self.run_root}/cpu/models/fraud_xgboost"))
-        self.data_dir = Path(os.getenv('DATA_DIR', f"{self.run_root}/cpu/data/features"))
-        self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
-        self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
-        
         # GPU Mode Check
         self.gpu_mode = os.getenv('EXECUTION_TYPE', 'cpu') == 'gpu'
+        exec_type = "gpu" if self.gpu_mode else "cpu"
+        
+        # In benchmark, we use the models path as source of truth for metadata
+        self.model_dir = Path(os.getenv('MODEL_DIR', f"{self.run_root}/{exec_type}/models/fraud_xgboost"))
+        self.data_dir = Path(os.getenv('DATA_DIR', f"{self.run_root}/{exec_type}/data/features"))
+        self.push_gateway = os.getenv('PUSHGATEWAY_URL', '10.23.181.153:9091')
+        self.max_wait = int(os.getenv('MAX_WAIT_SECONDS', '3600'))
         if self.gpu_mode:
             try:
                 import cupy as cp

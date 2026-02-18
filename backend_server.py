@@ -308,6 +308,10 @@ async def monitor_job_logs(job_name: str, run_id: str):
             try:
                 for event in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
                     if not state.is_running: break
+                    if state.run_id != run_id:
+                        logger.info(f"Monitor for {job_name} exiting: Run ID changed to {state.run_id}")
+                        break
+                    
                     line = event
                     
                     # Emit every log line to WebSockets for real-time visualization
@@ -332,6 +336,10 @@ async def monitor_job_logs(job_name: str, run_id: str):
                 w.stop()
             except Exception as stream_exc:
                 logger.error(f"Log stream interrupted for {pod_name}: {stream_exc}")
+            finally:
+                with state.lock:
+                    if monitor_id in state.active_monitors:
+                        state.active_monitors.remove(monitor_id)
 
         await asyncio.to_thread(tail_and_parse)
         
@@ -855,6 +863,9 @@ async def stop_pipeline_control():
     except Exception as e:
         logger.error(f"Failed to delete Job collection: {e}")
     
+    with state.lock:
+        state.active_monitors.clear()
+        
     return {"status": "stopped", "message": "Pipeline stop sequence initiated"}
 
 @app.post("/api/control/scale")
