@@ -308,15 +308,15 @@ async def monitor_job_logs(job_name: str, run_id: str):
                         if data:
                             # Update specific telemetry keys based on stage/status
                             with state.lock:
-                            if "rows" in data:
-                                state.telemetry[tele_key] = data["rows"]
-                                logger.info(f"Updated telemetry {tele_key} = {data['rows']}")
-                            if "throughput" in data:
-                                state.telemetry["throughput"] = data["throughput"]
-                            if "cpu_cores" in data:
-                                state.telemetry["cpu_percent"] = data["cpu_cores"]
-                            if "ram_percent" in data:
-                                state.telemetry["ram_percent"] = data["ram_percent"]
+                                if "rows" in data:
+                                    state.telemetry[tele_key] = data["rows"]
+                                    logger.info(f"Updated telemetry {tele_key} = {data['rows']}")
+                                if "throughput" in data:
+                                    state.telemetry["throughput"] = data["throughput"]
+                                if "cpu_cores" in data:
+                                    state.telemetry["cpu_percent"] = data["cpu_cores"]
+                                if "ram_percent" in data:
+                                    state.telemetry["ram_percent"] = data["ram_percent"]
                 w.stop()
             except Exception as stream_exc:
                 logger.error(f"Log stream interrupted for {pod_name}: {stream_exc}")
