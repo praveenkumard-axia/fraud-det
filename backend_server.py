@@ -162,10 +162,12 @@ def parse_telemetry_line(line: str) -> Optional[Dict]:
     try:
         # Extract key=value pairs
         data = {}
-        parts = line.split("|")
+        # Strip prefix and split
+        clean_line = line.replace("[TELEMETRY]", "").strip()
+        parts = clean_line.split("|")
         for part in parts:
             part = part.strip()
-            if "=" in part and "[TELEMETRY]" not in part:
+            if "=" in part:
                 key, value = part.split("=", 1)
                 key = key.strip()
                 value = value.strip()
@@ -173,9 +175,13 @@ def parse_telemetry_line(line: str) -> Optional[Dict]:
                 if key in ["stage", "status"]:
                     data[key] = value
                 elif key in ["rows", "throughput"]:
-                    data[key] = int(value)
+                    try:
+                        data[key] = int(value)
+                    except: pass
                 elif key in ["elapsed", "cpu_cores", "ram_gb", "ram_percent"]:
-                    data[key] = float(value)
+                    try:
+                        data[key] = float(value)
+                    except: pass
         
         return data
     except Exception as e:
@@ -285,37 +291,35 @@ async def monitor_job_logs(job_name: str, run_id: str):
         logger.info(f"Monitoring logs for {pod_name} -> state.telemetry['{tele_key}']")
         
         # 2. Stream logs in a separate thread to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
         def tail_and_parse():
             w = watch.Watch()
-            # Capture the event loop to schedule broadcasts back into it
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
             logger.info(f"Starting log stream for {pod_name}...")
-            for event in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
-                if not state.is_running: break
-                line = event
-                
-                # Emit every log line to WebSockets for real-time visualization
-                asyncio.run_coroutine_threadsafe(broadcast_alert(line, level="log"), loop)
+            try:
+                for event in w.stream(k8s_core.read_namespaced_pod_log, name=pod_name, namespace="fraud-det", follow=True):
+                    if not state.is_running: break
+                    line = event
+                    
+                    # Emit every log line to WebSockets for real-time visualization
+                    asyncio.run_coroutine_threadsafe(broadcast_alert(line, level="log"), loop)
 
-                if "[TELEMETRY]" in line:
-                    data = parse_telemetry_line(line)
-                    if data:
-                        # Update specific telemetry keys based on stage/status
-                        with state.lock:
+                    if "[TELEMETRY]" in line:
+                        data = parse_telemetry_line(line)
+                        if data:
+                            # Update specific telemetry keys based on stage/status
+                            with state.lock:
                             if "rows" in data:
                                 state.telemetry[tele_key] = data["rows"]
+                                logger.info(f"Updated telemetry {tele_key} = {data['rows']}")
                             if "throughput" in data:
                                 state.telemetry["throughput"] = data["throughput"]
                             if "cpu_cores" in data:
                                 state.telemetry["cpu_percent"] = data["cpu_cores"]
                             if "ram_percent" in data:
                                 state.telemetry["ram_percent"] = data["ram_percent"]
-            w.stop()
+                w.stop()
+            except Exception as stream_exc:
+                logger.error(f"Log stream interrupted for {pod_name}: {stream_exc}")
 
         await asyncio.to_thread(tail_and_parse)
         

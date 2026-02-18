@@ -25,7 +25,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -111,7 +111,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -211,7 +211,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -318,7 +318,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -335,7 +335,7 @@ spec:
       - name: wait-for-prep
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_ready_for_train ]; do echo waiting for features; sleep 10; done"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -425,7 +425,7 @@ spec:
         image: busybox
         securityContext:
           runAsUser: 0
-        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/tmp || true"]
+        command: ["sh", "-c", "mkdir -p /fraud-benchmark/runs/$(RUN_ID) && chmod -R 777 /fraud-benchmark/runs/$(RUN_ID) && chmod 777 /fraud-benchmark/tmp || true"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -442,7 +442,7 @@ spec:
       - name: wait-for-prep
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/cpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/cpu/data/features/_prep_ready_for_train ]; do echo waiting for features; sleep 10; done"]
         env:
         - name: RUN_ID
           value: "run-default"
@@ -548,7 +548,7 @@ spec:
       - name: wait-for-prep
         image: busybox
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_complete ]; do echo waiting for features; sleep 10; done"]
+        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/$(RUN_ID)/gpu/data/features/_prep_ready_for_train ]; do echo waiting for features; sleep 10; done"]
         env:
         - name: RUN_ID
           value: "run-default"
