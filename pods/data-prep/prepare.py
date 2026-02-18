@@ -148,6 +148,7 @@ class DataPrepService:
                 log(f"Failed to load checkpoint: {e}")
         
         log("Starting continuous processing loop...")
+        batch_idx = 0
         
         while not STOP_FLAG:
             # 0. Check for STOP signal
@@ -167,12 +168,10 @@ class DataPrepService:
                 if not new_files:
                     if gather_complete:
                         log("Upstream (Gather) is complete and all files processed. Signaling Prep completion.")
-                        break # Exit the while loop to write _prep_complete
+                        break 
                     time.sleep(1)
                     continue
 
-                # BATCH LIMIT: Avoid processing 48k files at once!
-                # We cap at 500 files to ensure smooth streaming and prevent OOM.
                 batch_limit = int(os.getenv('BATCH_SIZE_LIMIT', '500'))
                 if len(new_files) > batch_limit:
                     log(f"Found {len(new_files)} new files. Capping current batch to {batch_limit} for stability.")
@@ -184,7 +183,9 @@ class DataPrepService:
                 continue
             
             # 2. Process Batch
-            log(f"Processing batch of {len(new_files)} files...")
+            batch_idx += 1
+            if batch_idx % 10 == 0 or len(new_files) >= 100:
+                log(f"Processing batch {batch_idx} (files: {len(new_files)})")
             start_batch = time.time()
             try:
                 if self.gpu_mode:

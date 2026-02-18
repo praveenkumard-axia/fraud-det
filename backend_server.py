@@ -213,7 +213,7 @@ async def cleanup_pipeline_markers(run_id: str):
     except Exception as e:
         logger.warning(f"Marker cleanup failed (non-fatal): {e}")
 
-async def wait_for_telemetry_threshold(key: str, threshold: int, interval: int = 10):
+async def wait_for_telemetry_threshold(key: str, threshold: int, interval: int = 5):
     """Wait until a specific telemetry value reaches a threshold"""
     logger.info(f"Waiting for telemetry mapping['{key}'] to reach {threshold}...")
     while state.is_running:
@@ -427,14 +427,14 @@ async def run_pipeline_sequence():
         # We no longer rely on file system checks which are environment-dependent
         
         # Step A: Wait for 10,000 records to be GATHERED
-        gather_reached = await wait_for_telemetry_threshold("generated", 10000)
+        gather_reached = await wait_for_telemetry_threshold("generated", 5000)
         
         if not gather_reached:
             logger.warning("Pipeline stop requested or gather timeout. Aborting flow.")
             return
 
         # Step B: Wait for 10,000 records to be PREPROCESSED (GPU)
-        prep_reached = await wait_for_telemetry_threshold("data_prep_gpu", 10000)
+        prep_reached = await wait_for_telemetry_threshold("data_prep_gpu", 5000)
         
         if not prep_reached:
             logger.warning("Pipeline stop requested or prep timeout. Aborting flow.")

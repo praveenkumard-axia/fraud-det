@@ -139,7 +139,8 @@ class InferenceClient:
                     if STOP_FLAG: break
                     if (self.run_root / "STOP").exists(): break
                     
-                    self.log(f"Processing: {target_file.name}")
+                    if total_txns % 1000 == 0:
+                        self.log(f"Inference Progress: {total_txns} transactions processed...")
                     try:
                         start_time = time.time()
                         

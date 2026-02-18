@@ -259,7 +259,7 @@ spec:
         image: busybox
 
         imagePullPolicy: IfNotPresent
-        command: ["sh", "-c", "until [ -f /fraud-benchmark/runs/run-default/gpu/data/features/_prep_complete ]; do echo waiting for prep; sleep 5; done"]
+        command: ["sh", "-c", "until [ $(ls /fraud-benchmark/runs/run-default/gpu/data/raw | wc -l) -ge 10000 ]; do echo waiting for 10k files; sleep 10; done"]
         volumeMounts:
         - name: storage
           mountPath: /fraud-benchmark
