@@ -43,11 +43,11 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           requests:
-            cpu: "1"
-            memory: "2Gi"
+            cpu: "2"
+            memory: "8Gi"
           limits:
             cpu: "4"
-            memory: "8Gi"
+            memory: "16Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -116,11 +116,11 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           requests:
-            cpu: "1"
-            memory: "2Gi"
+            cpu: "2"
+            memory: "8Gi"
           limits:
             cpu: "4"
-            memory: "8Gi"
+            memory: "16Gi"
         env:
         - name: RUN_ID
           value: "run-default"
@@ -223,7 +223,7 @@ spec:
         resources:
           requests:
             cpu: "2"
-            memory: "4Gi"
+            memory: "8Gi"
             nvidia.com/gpu: 1
           limits:
             cpu: "8"
